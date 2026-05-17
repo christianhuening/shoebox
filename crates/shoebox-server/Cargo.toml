@@ -39,6 +39,7 @@ rustls-pemfile = { workspace = true }
 tokio-rustls = { workspace = true }
 axum-server = { workspace = true }
 argon2 = { workspace = true }
+rand = { workspace = true }
 clap = { workspace = true }
 x509-parser = { workspace = true }
 time = { workspace = true }
