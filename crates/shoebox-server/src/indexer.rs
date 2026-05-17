@@ -35,12 +35,21 @@ pub struct IndexerStats {
 /// - a `photos` row is inserted keyed by the hash if one doesn't already exist.
 /// - a `photo_files` row is inserted (or its `file_mtime`/`last_seen_at`/`is_present`
 ///   refreshed) keyed by the file's full path.
+/// - for every newly-inserted photo (`UpsertOutcome::PhotoAndFileNew`), a
+///   background task renders 256 px + 2k JPEG thumbnails into `cache_dir`.
+///   The task is fire-and-forget: per-file decode errors are warn-logged
+///   but never propagated.
 ///
 /// # Errors
 ///
 /// Returns an error if directory traversal fails fatally, if hashing fails,
-/// or if any catalog upsert fails.
-pub async fn initial_scan(db: Arc<Db>, photos_root: &Path) -> Result<IndexerStats> {
+/// or if any catalog upsert fails. Thumbnail-rendering errors are logged,
+/// not returned.
+pub async fn initial_scan(
+    db: Arc<Db>,
+    photos_root: &Path,
+    cache_dir: &Path,
+) -> Result<IndexerStats> {
     let mut stats = IndexerStats::default();
 
     let mut known_folder_paths: HashSet<PathBuf> = HashSet::new();
@@ -87,6 +96,10 @@ pub async fn initial_scan(db: Arc<Db>, photos_root: &Path) -> Result<IndexerStat
         let outcome = upsert_photo_and_file(&db, &hash_hex, file_size, file_path, file_mtime)
             .await
             .with_context(|| format!("upserting {}", file_path.display()))?;
+
+        if matches!(outcome, UpsertOutcome::PhotoAndFileNew) {
+            spawn_thumbnail_build(cache_dir, file_path, &hash_hex);
+        }
 
         match outcome {
             UpsertOutcome::PhotoAndFileNew => {
@@ -297,22 +310,46 @@ fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// Fire-and-forget: render 256 px + 2k JPEG previews for a newly-ingested
+/// photo on a blocking pool thread so the indexer loop doesn't stall on
+/// JPEG decode + encode work. Errors are warn-logged inside the closure;
+/// the spawned task is never awaited.
+fn spawn_thumbnail_build(cache_dir: &Path, raw_path: &Path, hash_hex: &str) {
+    let cache_dir_clone = cache_dir.to_path_buf();
+    let raw_path_clone: PathBuf = raw_path.to_path_buf();
+    let hash_hex_clone = hash_hex.to_string();
+    tokio::task::spawn_blocking(move || {
+        if let Err(thumbnail_err) =
+            crate::thumbnailer::build_both(&cache_dir_clone, &raw_path_clone, &hash_hex_clone)
+        {
+            tracing::warn!(
+                event = "thumb.build.error",
+                path = %raw_path_clone.display(),
+                error = %thumbnail_err,
+            );
+        }
+    });
+}
+
 /// Run the live filesystem watcher loop. Returns only on error or shutdown.
 ///
 /// Subscribes (recursively) to `photos_root` via the `notify` crate and
 /// reacts to create/modify/remove events by calling into the same upsert
-/// logic as [`initial_scan`]. The loop also terminates when `shutdown`
-/// resolves (or its sender is dropped), letting callers cleanly stop the
-/// watcher during server shutdown.
+/// logic as [`initial_scan`]. Newly-discovered photos also trigger a
+/// background thumbnail render into `cache_dir`. The loop also terminates
+/// when `shutdown` resolves (or its sender is dropped), letting callers
+/// cleanly stop the watcher during server shutdown.
 ///
 /// # Errors
 ///
 /// Returns an error if the watcher cannot be constructed or fails to
 /// register a watch on `photos_root`. Per-event handler errors are logged
-/// at warn level and do not terminate the loop.
+/// at warn level and do not terminate the loop. Thumbnail-rendering
+/// errors are likewise logged but never returned.
 pub async fn run_watcher(
     db: Arc<Db>,
     photos_root: PathBuf,
+    cache_dir: PathBuf,
     mut shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -339,7 +376,9 @@ pub async fn run_watcher(
             }
             event_result = event_receiver.recv() => match event_result {
                 Some(Ok(event)) => {
-                    if let Err(handle_err) = handle_event(&db, &photos_root, &event).await {
+                    if let Err(handle_err) =
+                        handle_event(&db, &photos_root, &cache_dir, &event).await
+                    {
                         tracing::warn!(
                             event = "indexer.handle.error",
                             error = %handle_err
@@ -361,7 +400,12 @@ pub async fn run_watcher(
     Ok(())
 }
 
-async fn handle_event(db: &Db, photos_root: &Path, event: &notify::Event) -> Result<()> {
+async fn handle_event(
+    db: &Db,
+    photos_root: &Path,
+    cache_dir: &Path,
+    event: &notify::Event,
+) -> Result<()> {
     use notify::EventKind;
     for path in &event.paths {
         if !is_raw_file(path) {
@@ -391,7 +435,11 @@ async fn handle_event(db: &Db, photos_root: &Path, event: &notify::Event) -> Res
                 let hash_hex =
                     tokio::task::spawn_blocking(move || hashing::blake3_hex(&path_to_hash))
                         .await??;
-                upsert_photo_and_file(db, &hash_hex, file_size, path, file_mtime).await?;
+                let outcome =
+                    upsert_photo_and_file(db, &hash_hex, file_size, path, file_mtime).await?;
+                if matches!(outcome, UpsertOutcome::PhotoAndFileNew) {
+                    spawn_thumbnail_build(cache_dir, path, &hash_hex);
+                }
             }
             EventKind::Remove(_) => {
                 let conn = db.connect()?;
@@ -425,12 +473,15 @@ mod tests {
         File::create(photos.join("2024/notes.txt")).unwrap(); // ignored
         File::create(photos.join("2025/_DSC0003.RAF")).unwrap();
 
+        let cache_dir = tmp.path().join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
         let db = Arc::new(
             crate::db::Db::open(&tmp.path().join("catalog.db"))
                 .await
                 .unwrap(),
         );
-        let stats = initial_scan(db.clone(), &photos).await.unwrap();
+        let stats = initial_scan(db.clone(), &photos, &cache_dir).await.unwrap();
 
         // 3 empty RAW files all hash to the same BLAKE3, so just 1 photo row,
         // but 3 photo_files rows (one per distinct path).

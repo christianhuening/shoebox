@@ -100,7 +100,7 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     // directory is treated as a no-op — both bindings stay `None` and the
     // shutdown block below is a no-op for the indexer.
     let (mut indexer_shutdown_tx, mut indexer_task) =
-        start_indexer(db.clone(), &cfg.photos_dir).await?;
+        start_indexer(db.clone(), &cfg.photos_dir, &cfg.cache_dir).await?;
 
     let state = http::AppState {
         db,
@@ -155,10 +155,12 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
 /// warning and `(None, None)` is returned so the caller's shutdown block
 /// becomes a no-op for the indexer. Otherwise returns the watcher's
 /// shutdown channel and `JoinHandle` so the caller can stop it on
-/// shutdown.
+/// shutdown. `cache_dir` is forwarded to the indexer so newly-discovered
+/// photos trigger background thumbnail rendering.
 async fn start_indexer(
     db: Arc<db::Db>,
     photos_root: &std::path::Path,
+    cache_dir: &std::path::Path,
 ) -> anyhow::Result<(
     Option<oneshot::Sender<()>>,
     Option<tokio::task::JoinHandle<()>>,
@@ -171,7 +173,7 @@ async fn start_indexer(
         );
         return Ok((None, None));
     }
-    let scan_stats = indexer::initial_scan(db.clone(), photos_root).await?;
+    let scan_stats = indexer::initial_scan(db.clone(), photos_root, cache_dir).await?;
     tracing::info!(
         event = "indexer.initial_scan",
         folders_seen = scan_stats.folders_seen,
@@ -183,8 +185,16 @@ async fn start_indexer(
     let (watcher_shutdown_tx, watcher_shutdown_rx) = oneshot::channel();
     let indexer_db = db;
     let indexer_root = photos_root.to_path_buf();
+    let indexer_cache_dir = cache_dir.to_path_buf();
     let watcher_task = tokio::spawn(async move {
-        if let Err(e) = indexer::run_watcher(indexer_db, indexer_root, watcher_shutdown_rx).await {
+        if let Err(e) = indexer::run_watcher(
+            indexer_db,
+            indexer_root,
+            indexer_cache_dir,
+            watcher_shutdown_rx,
+        )
+        .await
+        {
             tracing::error!(event = "indexer.run.error", error = %e);
         }
     });
