@@ -9,6 +9,7 @@ pub mod enroll;
 pub mod hashing;
 pub mod http;
 pub mod identity;
+pub mod indexer;
 pub mod logging;
 pub mod mdns;
 pub mod mtls;
