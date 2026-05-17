@@ -104,6 +104,7 @@ pub enum Message {
     EnrollmentFinalized {
         replica: Arc<Replica>,
         users: Vec<UserRow>,
+        thumb_cache: crate::thumb_cache::ThumbCache,
     },
     CertRenewalTick,
 
@@ -158,4 +159,5 @@ pub struct OpenedReplicaBundle {
     pub client: reqwest::Client,
     pub replica: Arc<Replica>,
     pub stats: library::LibraryStats,
+    pub thumb_cache: crate::thumb_cache::ThumbCache,
 }

@@ -495,12 +495,14 @@ impl App {
                     client,
                     replica,
                     stats,
+                    thumb_cache,
                 } = opened;
                 self.state.ca_pem = Some(ca_pem);
                 self.state.client = Some(client);
                 self.state.replica = Some(replica);
                 self.state.connection_status = ConnectionStatus::Online;
                 self.library_stats = stats;
+                self.state.thumb_cache = Some(thumb_cache);
                 let Some(replica) = self.state.replica.clone() else {
                     return iced::Task::none();
                 };
@@ -532,8 +534,13 @@ impl App {
                 self.state.last_error = None;
                 iced::Task::none()
             }
-            Message::EnrollmentFinalized { replica, users } => {
+            Message::EnrollmentFinalized {
+                replica,
+                users,
+                thumb_cache,
+            } => {
                 self.state.replica = Some(replica);
+                self.state.thumb_cache = Some(thumb_cache);
                 self.state.connection_status = ConnectionStatus::Online;
                 self.screen = Screen::ProfilePicker { users };
                 iced::Task::none()
@@ -561,11 +568,42 @@ impl App {
                     shoebox_client::library_state::LockStatus::Free;
                 command_for_grid(&self.state, folder_id)
             }
-            // Library view messages — handled in Tasks 20-23 (Plan 1.4b).
-            Message::LibraryGridLoaded { .. }
-            | Message::LibraryThumbReady { .. }
-            | Message::LibraryGridCellSelected(_)
-            | Message::LibraryDetailLoaded(_)
+            Message::LibraryGridLoaded { folder_id, cells } => {
+                if self.state.library_view.selected_folder_id.as_deref() != Some(&folder_id)
+                    && !folder_id.is_empty()
+                {
+                    return iced::Task::none();
+                }
+                match cells {
+                    Ok(loaded_cells) => {
+                        self.state.library_view.grid = loaded_cells;
+                        self.state.library_view.error = None;
+                        let tasks = thumb_fetch_commands(&self.state);
+                        iced::Task::batch(tasks)
+                    }
+                    Err(grid_err) => {
+                        self.state.library_view.error =
+                            Some(format!("Grid load failed: {grid_err}"));
+                        iced::Task::none()
+                    }
+                }
+            }
+            Message::LibraryThumbReady { hash, result } => {
+                if let Ok(image) = result {
+                    for cell in &mut self.state.library_view.grid {
+                        if cell.photo_id == hash {
+                            cell.thumbnail = Some(image.clone());
+                        }
+                    }
+                }
+                iced::Task::none()
+            }
+            Message::LibraryGridCellSelected(index) => {
+                self.state.library_view.selected_grid_index = Some(index);
+                command_for_detail(&self.state)
+            }
+            // Library view messages — handled in Tasks 21-23 (Plan 1.4b).
+            Message::LibraryDetailLoaded(_)
             | Message::LibraryRatingChanged { .. }
             | Message::LibraryRatingPersisted(_)
             | Message::LibraryKeywordInputChanged(_)
@@ -631,6 +669,26 @@ impl App {
         }));
         self.renewal_context = Some(renewal);
 
+        // Build the thumb cache up front so it can be handed to update()
+        // along with the post-enrollment replica.
+        let thumb_dir = directories::ProjectDirs::from("io", "shoebox", "shoebox-client")
+            .map_or_else(
+                || std::path::PathBuf::from("./shoebox-thumbs"),
+                |project_dirs| project_dirs.cache_dir().join("thumbs"),
+            );
+        let thumb_cache = match shoebox_client::thumb_cache::ThumbCache::new(
+            mtls_client.clone(),
+            server_url.clone(),
+            thumb_dir,
+        ) {
+            Ok(cache) => cache,
+            Err(cache_err) => {
+                self.state.last_error =
+                    Some(format!("could not build thumbnail cache: {cache_err}"));
+                return iced::Task::none();
+            }
+        };
+
         self.state.client = Some(mtls_client);
         self.discovery_browser = None; // we're paired
 
@@ -638,6 +696,7 @@ impl App {
         let ca_for_task = ca_pem;
         let cert_for_task = cert_pem;
         let key_for_task = key_pem;
+        let thumb_cache_for_task = thumb_cache;
         iced::Task::perform(
             async move {
                 let local_path = replica_local_path(&server_url_for_task)?;
@@ -658,13 +717,21 @@ impl App {
                 let users = profile_picker_screen::load_users(&conn)
                     .await
                     .map_err(|load_err| load_err.to_string())?;
-                Ok::<(Arc<Replica>, Vec<shoebox_client::screens::UserRow>), String>((
-                    Arc::new(replica),
-                    users,
-                ))
+                Ok::<
+                    (
+                        Arc<Replica>,
+                        Vec<shoebox_client::screens::UserRow>,
+                        shoebox_client::thumb_cache::ThumbCache,
+                    ),
+                    String,
+                >((Arc::new(replica), users, thumb_cache_for_task))
             },
             |result| match result {
-                Ok((replica, users)) => Message::EnrollmentFinalized { replica, users },
+                Ok((replica, users, thumb_cache)) => Message::EnrollmentFinalized {
+                    replica,
+                    users,
+                    thumb_cache,
+                },
                 Err(open_err) => Message::UsersLoaded(Err(open_err)),
             },
         )
@@ -706,6 +773,16 @@ async fn open_replica_and_load_stats(
         .map_err(|fetch_err| fetch_err.to_string())?;
     let mtls_client = build_mtls_client(&ca_pem, &cert_pem, &key_pem)
         .map_err(|build_err| build_err.to_string())?;
+    let thumb_dir = directories::ProjectDirs::from("io", "shoebox", "shoebox-client").map_or_else(
+        || std::path::PathBuf::from("./shoebox-thumbs"),
+        |project_dirs| project_dirs.cache_dir().join("thumbs"),
+    );
+    let thumb_cache = shoebox_client::thumb_cache::ThumbCache::new(
+        mtls_client.clone(),
+        server_url.clone(),
+        thumb_dir,
+    )
+    .map_err(|cache_err| cache_err.to_string())?;
     let local_path = replica_local_path(&server_url)?;
     let replica = Replica::open(&local_path, &server_url, &ca_pem, &cert_pem, &key_pem)
         .await
@@ -724,6 +801,7 @@ async fn open_replica_and_load_stats(
         client: mtls_client,
         replica: Arc::new(replica),
         stats,
+        thumb_cache,
     })
 }
 
@@ -789,5 +867,56 @@ fn command_for_grid(state: &AppState, folder_id: String) -> iced::Task<Message> 
                 cells: Err(grid_err),
             },
         },
+    )
+}
+
+/// Spawn one `LibraryThumbReady`-dispatching task per grid cell that does
+/// not yet have a thumbnail loaded. Empty when the cache is missing.
+fn thumb_fetch_commands(state: &AppState) -> Vec<iced::Task<Message>> {
+    let Some(thumb_cache) = state.thumb_cache.clone() else {
+        return Vec::new();
+    };
+    state
+        .library_view
+        .grid
+        .iter()
+        .filter(|cell| cell.thumbnail.is_none())
+        .map(|cell| {
+            let hash = cell.photo_id.clone();
+            let thumb_cache = thumb_cache.clone();
+            iced::Task::perform(
+                async move {
+                    let result = thumb_cache.get(&hash).await;
+                    (hash, result)
+                },
+                |(hash, result)| Message::LibraryThumbReady { hash, result },
+            )
+        })
+        .collect()
+}
+
+/// Spawn a task that loads detail metadata for the currently selected grid
+/// cell, dispatching `LibraryDetailLoaded`.
+fn command_for_detail(state: &AppState) -> iced::Task<Message> {
+    let Some(replica) = state.replica.clone() else {
+        return iced::Task::none();
+    };
+    let Some(user_id) = state.config.last_active_user_id.clone() else {
+        return iced::Task::none();
+    };
+    let Some(selected_index) = state.library_view.selected_grid_index else {
+        return iced::Task::none();
+    };
+    let Some(selected_cell) = state.library_view.grid.get(selected_index).cloned() else {
+        return iced::Task::none();
+    };
+    iced::Task::perform(
+        async move {
+            let conn = replica.conn().map_err(|conn_err| conn_err.to_string())?;
+            shoebox_client::library_state::load_detail(&conn, &selected_cell.variant_id, &user_id)
+                .await
+                .map_err(|detail_err| detail_err.to_string())
+        },
+        Message::LibraryDetailLoaded,
     )
 }
