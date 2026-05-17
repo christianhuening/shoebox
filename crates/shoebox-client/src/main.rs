@@ -33,7 +33,7 @@ use shoebox_client::mtls_http::build_mtls_client;
 use shoebox_client::replica::Replica;
 use shoebox_client::screens::{
     discovery as discovery_screen, enroll_progress as enroll_progress_screen,
-    enter_secret as enter_secret_screen, library as library_screen,
+    enter_secret as enter_secret_screen, library as library_screen, library_view,
     profile_picker as profile_picker_screen, Message, OpenedReplicaBundle, Screen,
 };
 
@@ -145,12 +145,7 @@ impl App {
                 users,
                 &self.new_user_draft,
             ),
-            Screen::Library => library_screen::view(
-                self.state.connection_status,
-                &self.state.config.server_url,
-                self.state.file_storage_warning.0,
-                &self.library_stats,
-            ),
+            Screen::Library => library_view::view(&self.state),
         }
     }
 
@@ -161,6 +156,15 @@ impl App {
                 .push(iced::time::every(REPLICA_SYNC_INTERVAL).map(|_| Message::ReplicaSyncTick));
             subscriptions
                 .push(iced::time::every(CERT_RENEWAL_INTERVAL).map(|_| Message::CertRenewalTick));
+            subscriptions.push(library_view::keyboard_subscription());
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_secs(5))
+                    .map(|_| Message::LibraryLockStatusTick),
+            );
+            subscriptions.push(
+                iced::time::every(std::time::Duration::from_secs(300))
+                    .map(|_| Message::LibraryLockHeartbeatTick),
+            );
         }
         // mDNS events stream in via a polling subscription that drains
         // the Browser's receiver. For v1 simplicity: poll every 250 ms
@@ -410,10 +414,11 @@ impl App {
                     return iced::Task::none();
                 };
                 let last_user = self.state.config.last_active_user_id.clone();
-                iced::Task::perform(
-                    load_library_stats(replica, last_user),
+                let stats_task = iced::Task::perform(
+                    load_library_stats(replica.clone(), last_user),
                     Message::LibraryStatsLoaded,
-                )
+                );
+                iced::Task::batch([stats_task, command_for_folder_tree(replica)])
             }
             Message::CreateUserSubmitted { display_name } => {
                 self.new_user_draft.clone_from(&display_name);
@@ -496,7 +501,10 @@ impl App {
                 self.state.replica = Some(replica);
                 self.state.connection_status = ConnectionStatus::Online;
                 self.library_stats = stats;
-                iced::Task::none()
+                let Some(replica) = self.state.replica.clone() else {
+                    return iced::Task::none();
+                };
+                command_for_folder_tree(replica)
             }
             Message::ReplicaOpenedAndStatsLoaded(Err(open_err)) => {
                 self.state.connection_status = ConnectionStatus::Offline;
@@ -531,10 +539,30 @@ impl App {
                 iced::Task::none()
             }
             Message::Shutdown => iced::Task::none(),
-            // Library view messages — handled in Tasks 19-23 (Plan 1.4b).
-            Message::LibraryFolderTreeLoaded(_)
-            | Message::LibraryFolderSelected(_)
-            | Message::LibraryGridLoaded { .. }
+            Message::LibraryFolderTreeLoaded(Ok(rows)) => {
+                self.state.library_view.folder_tree = rows;
+                self.state.library_view.error = None;
+                if let Some(first) = self.state.library_view.folder_tree.first().cloned() {
+                    self.state.library_view.selected_folder_id = Some(first.id.clone());
+                    return command_for_grid(&self.state, first.id);
+                }
+                iced::Task::none()
+            }
+            Message::LibraryFolderTreeLoaded(Err(folder_tree_err)) => {
+                self.state.library_view.error =
+                    Some(format!("Folder tree failed: {folder_tree_err}"));
+                iced::Task::none()
+            }
+            Message::LibraryFolderSelected(folder_id) => {
+                self.state.library_view.selected_folder_id = Some(folder_id.clone());
+                self.state.library_view.selected_grid_index = None;
+                self.state.library_view.detail = None;
+                self.state.library_view.lock_status =
+                    shoebox_client::library_state::LockStatus::Free;
+                command_for_grid(&self.state, folder_id)
+            }
+            // Library view messages — handled in Tasks 20-23 (Plan 1.4b).
+            Message::LibraryGridLoaded { .. }
             | Message::LibraryThumbReady { .. }
             | Message::LibraryGridCellSelected(_)
             | Message::LibraryDetailLoaded(_)
@@ -713,4 +741,53 @@ async fn load_library_stats(
     library_screen::load_stats(&conn, last_user_id.as_deref())
         .await
         .map_err(|stats_err| stats_err.to_string())
+}
+
+/// Spawn a task that loads the library's folder tree from the replica and
+/// dispatches `LibraryFolderTreeLoaded`.
+fn command_for_folder_tree(replica: Arc<Replica>) -> iced::Task<Message> {
+    iced::Task::perform(
+        async move {
+            let conn = replica
+                .conn()
+                .map_err(|conn_err| conn_err.to_string())?;
+            shoebox_client::library_state::load_folder_tree(&conn)
+                .await
+                .map_err(|tree_err| tree_err.to_string())
+        },
+        Message::LibraryFolderTreeLoaded,
+    )
+}
+
+/// Spawn a task that loads grid cells for a given folder and dispatches
+/// `LibraryGridLoaded` with the folder id preserved on both success and
+/// failure paths.
+fn command_for_grid(state: &AppState, folder_id: String) -> iced::Task<Message> {
+    let Some(replica) = state.replica.clone() else {
+        return iced::Task::none();
+    };
+    let Some(user_id) = state.config.last_active_user_id.clone() else {
+        return iced::Task::none();
+    };
+    iced::Task::perform(
+        async move {
+            let conn = replica
+                .conn()
+                .map_err(|conn_err| conn_err.to_string())?;
+            shoebox_client::library_state::load_grid_for_folder(&conn, &folder_id, &user_id)
+                .await
+                .map_err(|grid_err| grid_err.to_string())
+                .map(|cells| (folder_id, cells))
+        },
+        |result| match result {
+            Ok((folder_id, cells)) => Message::LibraryGridLoaded {
+                folder_id,
+                cells: Ok(cells),
+            },
+            Err(grid_err) => Message::LibraryGridLoaded {
+                folder_id: String::new(),
+                cells: Err(grid_err),
+            },
+        },
+    )
 }
