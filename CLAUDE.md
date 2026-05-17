@@ -80,12 +80,22 @@ Implementation directories (`shoebox-server/`, `shoebox-client/`, `shoebox-commo
 
 ## Implementation status
 
-- `crates/shoebox-server` — workspace skeleton, libSQL catalog with 6 migrations, internal Ed25519 CA + mTLS, /enroll + /renew + /whoami endpoints, CRL-aware client cert verification, clap CLI with `serve`/`revoke` subcommands, mDNS broadcaster, multi-stage Dockerfile. No indexer, thumbnailer, or libSQL wire proxy yet (Plan 1.3).
+- `crates/shoebox-server` — workspace skeleton, libSQL catalog with 6 migrations, internal Ed25519 CA + mTLS, /enroll + /renew + /whoami endpoints, CRL-aware client cert verification, clap CLI with `serve`/`revoke` subcommands, mDNS broadcaster, multi-stage Dockerfile. **Plan 1.3 in progress**: data-plane deps added (Task 1); `sqld_embed` module spawns sqld as a child subprocess (Task 2, pivoted — libsql-server isn't published on crates.io). Tasks 3-22 remaining: proxy, indexer, thumbnailer, dev-locks, janitor, backups, /metrics, cert renewal, integration tests.
 - `crates/shoebox-common` — shared `Error`/`Result`, `UserId`/`MachineId` types, `SCHEMA_VERSION` constant.
-- Run locally: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health on `127.0.0.1:9001`).
+- Run locally: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health on `127.0.0.1:9001`). Plan 1.3 work in progress means the proxy + indexer etc. aren't wired into main.rs yet.
 - Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev`.
 - CI: fmt + clippy + tests + docker build on push and PR.
 - **Toolchain:** `rust-toolchain.toml` pins `stable` (currently ~1.95). MSRV in workspace `Cargo.toml` is 1.85 — that's the floor for `libsql 0.6`'s transitive deps (edition2024).
+
+## Resuming Plan 1.3 execution
+
+To continue Plan 1.3 in a fresh session:
+- Plan path: `docs/superpowers/plans/2026-05-17-sub-1-3-server-data-plane.md`
+- Latest commit on data-plane work: `e003a54`
+- **Task 2 was pivoted:** the plan as written assumed `libsql-server` could be embedded as a crate dep. It can't (only published in the libsql monorepo with incompatible axum 0.6). Task 2 now spawns standalone `sqld` as a subprocess via `crates/shoebox-server/src/sqld_embed.rs`. See memory `project_libsql_server_unpublished.md` for the full reasoning and the known v1 two-writers-to-catalog.db architectural debt.
+- **Tasks 3 onward proceed as written in the plan**, but the proxy (Task 3) targets the sqld subprocess URL (already returned by `sqld_embed::start`).
+- **Task 4 (proxy e2e test) and Task 19/20 (indexer/locks e2e tests) need `sqld` on PATH** to actually run. Install with `cargo install --git https://github.com/tursodatabase/libsql sqld` or download a release binary; otherwise the proxy test will need to be gated like `sqld_embed::tests::starts_subprocess_if_sqld_present` (skip when absent).
+- **Task 22 (Dockerfile updates) must install `sqld` in the runtime image** so the deployed container can spawn it.
 
 ## Memory pointers
 
