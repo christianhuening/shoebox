@@ -32,7 +32,25 @@ async fn main() -> anyhow::Result<()> {
     let ca = Arc::new(ca::Ca::open(&cfg.data_dir)?);
     let sans = ca::build_server_sans(&cfg.server_name, &cfg.extra_sans);
     let (server_cert, server_kp) = ca.issue_server_cert(&sans)?;
-    let tls_cfg = mtls::mtls_server_config(&server_cert, &server_kp, &ca)?;
+
+    // Build the CRL cache, populate it once synchronously, then spawn a
+    // background task to refresh it every 30 seconds.
+    let crl = mtls::CrlCache::new();
+    refresh_crl(&db, &crl).await?;
+    tokio::spawn({
+        let db_for_crl = db.clone();
+        let crl_for_task = crl.clone();
+        async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                if let Err(e) = refresh_crl(&db_for_crl, &crl_for_task).await {
+                    tracing::warn!(event = "crl.refresh.error", error = %e);
+                }
+            }
+        }
+    });
+
+    let tls_cfg = mtls::mtls_server_config(&server_cert, &server_kp, &ca, crl.clone())?;
 
     // Bootstrap shared catalog secret.
     let conn = db.connect()?;
@@ -234,4 +252,27 @@ where
         }
         self.inner.call(req)
     }
+}
+
+// ── CRL refresh ───────────────────────────────────────────────────────────────
+
+/// Load all revoked cert serials from the database and update the in-memory
+/// CRL cache. Called once at startup and then every 30 seconds in a background
+/// task, so revocation takes effect within at most one refresh interval.
+async fn refresh_crl(
+    db: &std::sync::Arc<db::Db>,
+    crl: &mtls::CrlCache,
+) -> anyhow::Result<()> {
+    let conn = db.connect()?;
+    let mut rows = conn
+        .query("SELECT serial_number FROM revoked_certs", ())
+        .await?;
+    let mut revoked_set = std::collections::HashSet::new();
+    while let Some(row) = rows.next().await? {
+        revoked_set.insert(row.get::<String>(0)?);
+    }
+    let revoked_count = revoked_set.len();
+    crl.replace(revoked_set);
+    tracing::debug!(event = "crl.refresh", revoked_count, "CRL cache refreshed");
+    Ok(())
 }
