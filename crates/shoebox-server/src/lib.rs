@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod enroll;
 pub mod http;
+pub mod identity;
 pub mod logging;
 pub mod mdns;
 pub mod mtls;
