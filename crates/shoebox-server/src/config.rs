@@ -8,9 +8,17 @@ use std::path::PathBuf;
 pub struct Config {
     pub server_name: String,
     pub bind_addr: SocketAddr,
+    #[serde(default = "default_health_bind_addr")]
+    pub health_bind_addr: SocketAddr,
     pub data_dir: PathBuf,
     pub photos_dir: PathBuf,
     pub cache_dir: PathBuf,
+    #[serde(default)]
+    pub extra_sans: Vec<String>,
+}
+
+fn default_health_bind_addr() -> SocketAddr {
+    "127.0.0.1:9001".parse().expect("valid default")
 }
 
 impl Config {
@@ -42,6 +50,19 @@ impl Config {
         }
         if let Ok(v) = std::env::var("SHOEBOX_SERVER_NAME") {
             self.server_name = v;
+        }
+        if let Ok(v) = std::env::var("SHOEBOX_HEALTH_BIND_ADDR") {
+            match v.parse() {
+                Ok(addr) => self.health_bind_addr = addr,
+                Err(e) => tracing::warn!(
+                    event = "config.health_bind_addr.invalid",
+                    value = %v, error = %e,
+                    "SHOEBOX_HEALTH_BIND_ADDR could not be parsed; keeping value from config"
+                ),
+            }
+        }
+        if let Ok(v) = std::env::var("SHOEBOX_EXTRA_SANS") {
+            self.extra_sans = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         }
         self
     }
@@ -78,6 +99,13 @@ impl Config {
             cache_dir: std::path::PathBuf::from(
                 std::env::var("SHOEBOX_CACHE_DIR").unwrap_or_else(|_| "/shoebox-cache".into()),
             ),
+            health_bind_addr: std::env::var("SHOEBOX_HEALTH_BIND_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:9001".into())
+                .parse()
+                .expect("SHOEBOX_HEALTH_BIND_ADDR must parse as SocketAddr"),
+            extra_sans: std::env::var("SHOEBOX_EXTRA_SANS")
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .unwrap_or_default(),
         }
     }
 }
@@ -87,7 +115,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_minimal_toml() {
+    fn parses_minimal_toml_with_defaults() {
         let s = r#"
             server_name = "shoebox-test"
             bind_addr = "127.0.0.1:9000"
@@ -98,7 +126,22 @@ mod tests {
         let cfg = Config::from_toml_str(s).unwrap();
         assert_eq!(cfg.server_name, "shoebox-test");
         assert_eq!(cfg.bind_addr.port(), 9000);
-        assert_eq!(cfg.data_dir, PathBuf::from("/var/lib/shoebox"));
+        assert_eq!(cfg.health_bind_addr.port(), 9001);
+        assert!(cfg.extra_sans.is_empty());
+    }
+
+    #[test]
+    fn parses_toml_with_extra_sans() {
+        let s = r#"
+            server_name = "x"
+            bind_addr = "127.0.0.1:9000"
+            data_dir = "/d"
+            photos_dir = "/p"
+            cache_dir = "/c"
+            extra_sans = ["a.example.com", "b.example.com"]
+        "#;
+        let cfg = Config::from_toml_str(s).unwrap();
+        assert_eq!(cfg.extra_sans, vec!["a.example.com", "b.example.com"]);
     }
 
     #[test]

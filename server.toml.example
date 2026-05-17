@@ -3,3 +3,12 @@ bind_addr = "127.0.0.1:9000"
 data_dir = "./data"
 photos_dir = "./photos"
 cache_dir = "./cache"
+
+# Optional: bind address for the unauthenticated /health endpoint.
+# Defaults to 127.0.0.1:9001 (loopback only). Used by container
+# healthchecks and Kubernetes readiness probes.
+# health_bind_addr = "127.0.0.1:9001"
+
+# Optional: extra subjectAltName entries to include in the server cert
+# (e.g. external DNS names, reverse-proxy hostnames). Defaults to none.
+# extra_sans = ["shoebox.example.com", "10.0.5.42"]
