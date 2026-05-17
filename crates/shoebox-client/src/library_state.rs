@@ -396,10 +396,101 @@ fn now_unix_ms() -> i64 {
     i64::try_from(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0),
+            .map_or(0, |duration| duration.as_millis()),
     )
     .unwrap_or(0)
+}
+
+/// Attach a keyword to a photo. Creates the root-level keyword if it
+/// doesn't already exist. On UNIQUE conflict (a concurrent insert won),
+/// resolves the existing `keyword_id` and proceeds.
+///
+/// Note: `SQLite` treats two NULLs as distinct in UNIQUE indexes, so
+/// `UNIQUE(parent_id, name)` does not prevent duplicate root keywords via
+/// conflict alone. We use a SELECT-first strategy for root keywords to
+/// guarantee at-most-one row, then fall back to INSERT if absent.
+pub async fn add_keyword(
+    conn: &libsql::Connection,
+    photo_id: &str,
+    user_id: &str,
+    name: &str,
+) -> Result<String> {
+    let now_ms = now_unix_ms();
+
+    // SELECT-first for root keywords (NULL parent) to avoid SQLite's
+    // NULL-distinct UNIQUE behaviour creating duplicates.
+    let mut existing_rows = conn
+        .query(
+            "SELECT id FROM keywords WHERE parent_id IS NULL AND name = ?1",
+            [name],
+        )
+        .await
+        .context("checking for existing keyword")?;
+
+    let keyword_id = if let Some(existing_row) = existing_rows.next().await? {
+        existing_row.get::<String>(0)?
+    } else {
+        let new_id = uuid_v4_hex();
+        let insert_result = conn
+            .execute(
+                "INSERT INTO keywords(id, parent_id, name, created_at) VALUES (?1, NULL, ?2, ?3)",
+                (new_id.as_str(), name, now_ms),
+            )
+            .await;
+
+        match insert_result {
+            Ok(_) => new_id,
+            Err(error) => {
+                let msg = error.to_string().to_lowercase();
+                if !(msg.contains("unique") || msg.contains("constraint")) {
+                    return Err(error).context("inserting keyword");
+                }
+                // Lost a race: another writer inserted between our SELECT
+                // and our INSERT. Re-query for the winner's id.
+                let mut rows = conn
+                    .query(
+                        "SELECT id FROM keywords WHERE parent_id IS NULL AND name = ?1",
+                        [name],
+                    )
+                    .await?;
+                let resolved = rows
+                    .next()
+                    .await?
+                    .context("keyword INSERT failed UNIQUE but no row found")?;
+                resolved.get::<String>(0)?
+            }
+        }
+    };
+
+    conn.execute(
+        "INSERT OR IGNORE INTO photo_keywords(photo_id, keyword_id, added_by, added_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        (photo_id, keyword_id.as_str(), user_id, now_ms),
+    )
+    .await
+    .context("attaching keyword to photo")?;
+    Ok(keyword_id)
+}
+
+pub async fn remove_keyword(
+    conn: &libsql::Connection,
+    photo_id: &str,
+    keyword_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM photo_keywords WHERE photo_id = ?1 AND keyword_id = ?2",
+        (photo_id, keyword_id),
+    )
+    .await
+    .context("removing keyword")?;
+    Ok(())
+}
+
+fn uuid_v4_hex() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 #[cfg(test)]
@@ -698,5 +789,42 @@ mod tests {
         upsert_rating(&conn, "v1", "u1", 5).await.unwrap();
         let detail = load_detail(&conn, "v1", "u1").await.unwrap();
         assert_eq!(detail.rating, 5);
+    }
+
+    #[tokio::test]
+    async fn add_keyword_creates_and_attaches() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+
+        let id = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
+        insert_variant(&conn, "v1", "p1", 0).await;
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert_eq!(detail.keywords.len(), 1);
+        assert_eq!(detail.keywords[0].id, id);
+        assert_eq!(detail.keywords[0].name, "trees");
+    }
+
+    #[tokio::test]
+    async fn add_keyword_twice_resolves_to_same_id() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_photo(&conn, "p2", "f1", "/x/two.pef", 200).await;
+        let id_a = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
+        let id_b = add_keyword(&conn, "p2", "u1", "trees").await.unwrap();
+        assert_eq!(id_a, id_b);
+    }
+
+    #[tokio::test]
+    async fn remove_keyword_detaches_only_specified_pair() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_variant(&conn, "v1", "p1", 0).await;
+        let id = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
+        remove_keyword(&conn, "p1", &id).await.unwrap();
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert!(detail.keywords.is_empty());
     }
 }
