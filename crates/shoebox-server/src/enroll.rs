@@ -88,6 +88,30 @@ async fn enroll_handler(
     let issued = sign_csr(&state.ca, &req.csr_pem, &user_id, &machine_id)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("csr: {e}")))?;
 
+    // Materialize a session row keyed by the new cert's serial. The lock
+    // endpoints derive `session_id = identity.cert_serial_hex`, and
+    // `develop_locks.session_id` has a FK into `sessions(id)` — without
+    // this row, the very first lock acquire from this client would 500.
+    let enroll_session_id = issued.serial_hex.clone();
+    let enroll_now_ms = now_ms();
+    conn.execute(
+        "INSERT INTO sessions (id, user_id, client_machine_id, established_at, last_active_at) \
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+        (
+            enroll_session_id,
+            user_id.to_string(),
+            machine_id.to_string(),
+            enroll_now_ms,
+        ),
+    )
+    .await
+    .map_err(|insert_err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("session insert: {insert_err}"),
+        )
+    })?;
+
     tracing::info!(
         event = "enrollment.completed",
         user_id = %user_id,
@@ -176,6 +200,36 @@ async fn renew_handler(
         &identity.machine_id,
     )
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("csr: {e}")))?;
+
+    // Materialize a session row for the newly-issued cert serial. The old
+    // session row (keyed by `identity.cert_serial_hex`) is intentionally
+    // left alone — the client may still have in-flight requests under the
+    // old cert. The janitor's session_sweep will GC the stale row once
+    // `last_active_at` ages out.
+    let renew_conn = state
+        .db
+        .connect()
+        .map_err(|db_err| (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {db_err}")))?;
+    let renewed_session_id = issued.serial_hex.clone();
+    let renew_now_ms = now_ms();
+    renew_conn
+        .execute(
+            "INSERT INTO sessions (id, user_id, client_machine_id, established_at, last_active_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            (
+                renewed_session_id,
+                identity.user_id.to_string(),
+                identity.machine_id.to_string(),
+                renew_now_ms,
+            ),
+        )
+        .await
+        .map_err(|insert_err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("session insert: {insert_err}"),
+            )
+        })?;
 
     tracing::info!(
         event = "renewal.completed",

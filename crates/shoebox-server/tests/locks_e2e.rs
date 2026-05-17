@@ -110,31 +110,10 @@ async fn develop_lock_acquire_takeover_release() {
         .unwrap();
 
     // Enroll two clients with independent certs => independent session IDs.
+    // The /enroll handler now creates a `sessions` row per issued cert, so
+    // there's no need to seed those rows here.
     let alice_identity = enroll(addr, &secret_plaintext, &root_store, "Alice").await;
     let bob_identity = enroll(addr, &secret_plaintext, &root_store, "Bob").await;
-
-    // The develop_locks rows have FK constraints into sessions(id), but the
-    // /enroll handler does not create a session row (sessions are a separate
-    // concern from cert issuance). Seed one per client here so lock_acquire
-    // doesn't trip an FK violation. The session_id matches the cert serial,
-    // which is what `ClientIdentity::cert_serial_hex` yields server-side.
-    let session_seed_ts = 2_000_i64;
-    let session_seed_conn = db.connect().unwrap();
-    for client_identity in [&alice_identity, &bob_identity] {
-        session_seed_conn
-            .execute(
-                "INSERT INTO sessions (id, user_id, client_machine_id, established_at, last_active_at) \
-                 VALUES (?1, ?2, 'test-machine', ?3, ?3)",
-                (
-                    client_identity.cert_serial_hex.clone(),
-                    client_identity.user_id.clone(),
-                    session_seed_ts,
-                ),
-            )
-            .await
-            .unwrap();
-    }
-    drop(session_seed_conn);
 
     let alice = &alice_identity.http_client;
     let bob = &bob_identity.http_client;
@@ -203,17 +182,15 @@ async fn develop_lock_acquire_takeover_release() {
     let _ = server.await;
 }
 
-/// Bundle of (enrolled identity, authed reqwest client) returned by `enroll`.
+/// Bundle returned by `enroll`: an authed reqwest client that presents the
+/// issued client cert on every request.
 struct EnrolledClient {
-    user_id: String,
-    cert_serial_hex: String,
     http_client: Client,
 }
 
 /// Generate a fresh keypair + CSR, enroll over plain TLS (no client cert),
-/// then return an `EnrolledClient` carrying the server-assigned `user_id` +
-/// cert serial and a reqwest `Client` that presents the issued cert on
-/// every request.
+/// then return an `EnrolledClient` whose reqwest `Client` presents the
+/// issued cert on every request.
 async fn enroll(
     addr: std::net::SocketAddr,
     secret: &str,
@@ -260,8 +237,6 @@ async fn enroll(
     );
     let enroll_body: serde_json::Value = enroll_resp.json().await.unwrap();
     let client_cert_pem = enroll_body["client_cert_pem"].as_str().unwrap().to_string();
-    let user_id = enroll_body["user_id"].as_str().unwrap().to_string();
-    let cert_serial_hex = enroll_body["cert_serial_hex"].as_str().unwrap().to_string();
 
     let client_cert_der = pem_to_der(&client_cert_pem).unwrap();
     let client_key_der = parse_first_private_key(&client_keypair.serialize_pem()).unwrap();
@@ -275,11 +250,7 @@ async fn enroll(
         .build()
         .unwrap();
 
-    EnrolledClient {
-        user_id,
-        cert_serial_hex,
-        http_client,
-    }
+    EnrolledClient { http_client }
 }
 
 // ── PEM helpers ───────────────────────────────────────────────────────────────
