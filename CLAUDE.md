@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Plans 1.1+1.2+1.3 implemented (server data plane). Plan 1.4 implemented (desktop client foundation: Iced shell + first-run wizard + libSQL embedded replica through mTLS proxy). Plans 1.4b (demo library view) and 1.5 (deployment) pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plans 1.1–1.4b implemented. Plan 1.5 (deployment) pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -99,6 +99,12 @@ Deployment directories (`deploy/`, etc.) will be added as Plan 1.5 begins.
   - libSQL embedded replica through the mTLS proxy; 30s background catchup ticker
   - 12h background cert renewal task; re-issues when <30 days remain
   - Linux + macOS + Windows from one source tree (manual smoke on each)
+- `crates/shoebox-client` — demo library view (Plan 1.4b):
+  - Three-pane Library screen: folder tree / photo grid with thumbnails / EXIF + edit detail panel
+  - `ThumbCache`: in-memory LRU (1024) + on-disk JPEG cache; mTLS fetch from `<server>/thumbs/<hash>`
+  - Editing actions through local replica: rate (per-user UPSERT), keyword add/remove (race-resolved), virtual copy
+  - Develop-lock UI: 5 s status poll from local replica; acquire/release/takeover via `/locks/:id`; 5 min heartbeat
+  - Keyboard: arrows navigate grid; 0-5 set rating on selected variant
 - `crates/shoebox-common` — shared `Error`/`Result`, `UserId`/`MachineId`, `SCHEMA_VERSION`.
 - Run locally:
   - Server: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health+metrics on `127.0.0.1:9001`).
@@ -107,13 +113,15 @@ Deployment directories (`deploy/`, etc.) will be added as Plan 1.5 begins.
 - CI: fmt + clippy + tests + docker build on push and PR.
 - **Toolchain:** `rust-toolchain.toml` pins `stable`. MSRV in workspace `Cargo.toml` is 1.85 (libsql 0.6 transitive deps require edition2024).
 
-## Known limitations (Plan 1.3+1.4 v1)
+## Known limitations (Plan 1.3+1.4+1.4b v1)
 
-Surfaced during Plan 1.3/1.4 implementation; tracked as memory notes for future attention:
+Surfaced during Plan 1.3/1.4/1.4b implementation; tracked as memory notes for future attention:
 
 - **rawler forces JPEG decode + re-encode.** No public access to raw embedded JPEG bytes; we decode via rawler and re-encode at quality 90. Net cost: one extra JPEG round-trip per indexed RAW. See memory: `project_rawler_api_constraints.md`.
 - **Two writers to `catalog.db`.** The migration runner (`Db`) and the spawned `sqld` subprocess both hold the same SQLite file. SQLite WAL handles this badly across processes; the v1 risk is accepted. Resolution: route all server-side writes through the loopback sqld connection. See memory: `project_libsql_server_unpublished.md`.
-- **Client Library screen is a placeholder.** Plan 1.4's Library view shows connection status, schema version, photo/folder counts, and active user — no grid, no filmstrip, no thumbnails. The polished library UI lands in Plan 1.4b (demo library view) and the full browser in sub-project #3.
+- **No grid virtualization.** Folders with thousands of photos will render slowly. Plan 1.4b grids ~30-photo test sets cleanly; full virtualization is sub-project #3.
+- **Lock UI surfaces 4 states, no auto-release on app exit.** Releasing a lock requires the user clicking Release; if the app dies, the lock expires via the server janitor's 30 min TTL instead.
+- **Keywords UNIQUE(parent_id, name) doesn't dedupe roots.** SQLite UNIQUE-on-NULL treats NULLs as distinct; the client's `add_keyword` SELECTs-then-INSERTs as a workaround. Server schema needs a partial unique index in a future migration. See memory: `project_keywords_unique_null_root.md`.
 
 ## Memory pointers
 

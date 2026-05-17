@@ -7,10 +7,7 @@ use crate::library_state::FolderRow;
 use crate::screens::Message;
 
 #[must_use]
-pub fn view<'a>(
-    rows: &'a [FolderRow],
-    selected: Option<&'a str>,
-) -> Element<'a, Message> {
+pub fn view<'a>(rows: &'a [FolderRow], selected: Option<&'a str>) -> Element<'a, Message> {
     let mut column_widget = column![text("Folders").size(18)].spacing(2).padding(8);
     if rows.is_empty() {
         column_widget = column_widget.push(text("(empty)"));

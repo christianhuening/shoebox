@@ -179,7 +179,11 @@ async fn library_view_round_trips_folder_grid_detail_and_edits() {
     let folder_tree = shoebox_client::library_state::load_folder_tree(&conn)
         .await
         .unwrap();
-    assert_eq!(folder_tree.len(), 1, "expected one folder, got {folder_tree:?}");
+    assert_eq!(
+        folder_tree.len(),
+        1,
+        "expected one folder, got {folder_tree:?}"
+    );
     let folder_id = folder_tree[0].id.clone();
 
     let grid = shoebox_client::library_state::load_grid_for_folder(&conn, &folder_id, &user_id)

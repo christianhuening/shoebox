@@ -29,10 +29,7 @@ async fn serve(jpeg: Vec<u8>) -> (String, Arc<AtomicUsize>) {
             let jpeg = jpeg_clone.clone();
             async move {
                 counter.fetch_add(1, Ordering::SeqCst);
-                (
-                    [(axum::http::header::CONTENT_TYPE, "image/jpeg")],
-                    jpeg,
-                )
+                ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], jpeg)
             }
         }),
     );

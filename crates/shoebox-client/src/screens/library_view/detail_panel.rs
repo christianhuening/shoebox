@@ -1,9 +1,7 @@
 //! Right-pane: EXIF + rating + keyword editor + virtual-copy button +
 //! lock-status banner.
 
-use iced::widget::{
-    button, column as col, container, row, scrollable, text, text_input, Row,
-};
+use iced::widget::{button, column as col, container, row, scrollable, text, text_input, Row};
 use iced::{Element, Length};
 
 use crate::library_state::{DetailLoaded, LockStatus};
@@ -44,15 +42,14 @@ fn detail_body<'a>(
         _ => "—".into(),
     };
     #[allow(clippy::cast_precision_loss)]
-    let shutter = exif
-        .shutter_us
-        .map_or_else(|| "—".into(), |us| format!("1/{:.0}s", 1_000_000.0 / us as f64));
+    let shutter = exif.shutter_us.map_or_else(
+        || "—".into(),
+        |us| format!("1/{:.0}s", 1_000_000.0 / us as f64),
+    );
     let aperture = exif
         .aperture
         .map_or_else(|| "—".into(), |f| format!("f/{f:.1}"));
-    let iso = exif
-        .iso
-        .map_or_else(|| "—".into(), |n| n.to_string());
+    let iso = exif.iso.map_or_else(|| "—".into(), |n| n.to_string());
     let focal = exif
         .focal_length_mm
         .map_or_else(|| "—".into(), |f| format!("{f:.0}mm"));
@@ -84,8 +81,8 @@ fn detail_body<'a>(
     .spacing(6);
 
     let lock_block = lock_banner(lock_status);
-    let virtual_copy_button = button(text("New virtual copy"))
-        .on_press(Message::LibraryNewVirtualCopyClicked);
+    let virtual_copy_button =
+        button(text("New virtual copy")).on_press(Message::LibraryNewVirtualCopyClicked);
 
     col![
         exif_block,
@@ -142,25 +139,23 @@ fn lock_banner(status: &LockStatus) -> Element<'_, Message> {
             text(format!(
                 "{requested_by_display_name} requested takeover of your lock"
             )),
-            row![
-                button(text("Release")).on_press(Message::LibraryReleaseLockClicked),
-            ]
-            .spacing(8),
+            row![button(text("Release")).on_press(Message::LibraryReleaseLockClicked),].spacing(8),
         ]
         .spacing(4)
         .into(),
-        LockStatus::HeldByOther { holder_display_name } => row![
+        LockStatus::HeldByOther {
+            holder_display_name,
+        } => row![
             text(format!("Held by {holder_display_name}")),
-            button(text("Request takeover"))
-                .on_press(Message::LibraryRequestTakeoverClicked),
+            button(text("Request takeover")).on_press(Message::LibraryRequestTakeoverClicked),
         ]
         .spacing(8)
         .into(),
-        LockStatus::HeldByOtherTakeoverPending { holder_display_name } => {
-            text(format!(
-                "Waiting on {holder_display_name} to release the lock…"
-            ))
-            .into()
-        }
+        LockStatus::HeldByOtherTakeoverPending {
+            holder_display_name,
+        } => text(format!(
+            "Waiting on {holder_display_name} to release the lock…"
+        ))
+        .into(),
     }
 }

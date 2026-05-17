@@ -45,9 +45,9 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
 pub fn keyboard_subscription() -> Subscription<Message> {
     iced::keyboard::on_key_press(|key, _modifiers| match key {
-        Key::Named(Named::ArrowLeft) => {
-            Some(Message::LibraryKeyboardNavigation(NavigationDirection::Left))
-        }
+        Key::Named(Named::ArrowLeft) => Some(Message::LibraryKeyboardNavigation(
+            NavigationDirection::Left,
+        )),
         Key::Named(Named::ArrowRight) => Some(Message::LibraryKeyboardNavigation(
             NavigationDirection::Right,
         )),

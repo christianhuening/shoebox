@@ -21,7 +21,10 @@ pub async fn load_stats(
     let mut stats = LibraryStats::default();
 
     let mut rows = conn
-        .query("SELECT COALESCE(MAX(version), 0) FROM _schema_migrations", ())
+        .query(
+            "SELECT COALESCE(MAX(version), 0) FROM _schema_migrations",
+            (),
+        )
         .await?;
     if let Some(r) = rows.next().await? {
         stats.schema_version = r.get(0)?;

@@ -61,8 +61,7 @@ impl ThumbCache {
         disk_dir: PathBuf,
     ) -> Result<Self> {
         std::fs::create_dir_all(&disk_dir)?;
-        let capacity =
-            NonZeroUsize::new(MEMORY_CAPACITY).expect("MEMORY_CAPACITY is non-zero");
+        let capacity = NonZeroUsize::new(MEMORY_CAPACITY).expect("MEMORY_CAPACITY is non-zero");
         Ok(Self {
             state: Arc::new(Mutex::new(State {
                 memory: LruCache::new(capacity),
@@ -164,8 +163,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn build_cache(disk_dir: PathBuf) -> ThumbCache {
-        ThumbCache::new(reqwest::Client::new(), "https://server.invalid".into(), disk_dir)
-            .expect("cache constructs")
+        ThumbCache::new(
+            reqwest::Client::new(),
+            "https://server.invalid".into(),
+            disk_dir,
+        )
+        .expect("cache constructs")
     }
 
     #[test]
@@ -192,7 +195,10 @@ mod tests {
         let img = image::RgbImage::from_pixel(1, 1, image::Rgb([255, 255, 255]));
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgb8(img)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Jpeg,
+            )
             .unwrap();
         bytes
     }
@@ -209,10 +215,7 @@ mod tests {
                 let jpeg = jpeg_clone.clone();
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
-                    (
-                        [(axum::http::header::CONTENT_TYPE, "image/jpeg")],
-                        jpeg,
-                    )
+                    ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], jpeg)
                 }
             }),
         );
@@ -228,12 +231,10 @@ mod tests {
     async fn concurrent_gets_for_same_hash_do_one_http_request() {
         let tmp = TempDir::new().unwrap();
         let (url, counter) = spawn_counting_server(tiny_jpeg()).await;
-        let cache =
-            ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
+        let cache = ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
         let cache_a = cache.clone();
         let cache_b = cache.clone();
-        let (result_a, result_b) =
-            tokio::join!(cache_a.get("hash1"), cache_b.get("hash1"));
+        let (result_a, result_b) = tokio::join!(cache_a.get("hash1"), cache_b.get("hash1"));
         assert!(result_a.is_ok());
         assert!(result_b.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -243,8 +244,7 @@ mod tests {
     async fn second_call_after_first_succeeds_is_memory_hit() {
         let tmp = TempDir::new().unwrap();
         let (url, counter) = spawn_counting_server(tiny_jpeg()).await;
-        let cache =
-            ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
+        let cache = ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
         assert!(cache.get("hash1").await.is_ok());
         assert!(cache.get("hash1").await.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -256,8 +256,7 @@ mod tests {
         let (url, counter) = spawn_counting_server(tiny_jpeg()).await;
         // Pre-seed the disk with the JPEG.
         std::fs::write(tmp.path().join("hash1.jpg"), tiny_jpeg()).unwrap();
-        let cache =
-            ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
+        let cache = ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
         assert!(cache.get("hash1").await.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }

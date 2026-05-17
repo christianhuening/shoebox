@@ -64,9 +64,15 @@ pub enum LockStatus {
     #[default]
     Free,
     HeldByYou,
-    HeldByYouTakeoverPending { requested_by_display_name: String },
-    HeldByOther { holder_display_name: String },
-    HeldByOtherTakeoverPending { holder_display_name: String },
+    HeldByYouTakeoverPending {
+        requested_by_display_name: String,
+    },
+    HeldByOther {
+        holder_display_name: String,
+    },
+    HeldByOtherTakeoverPending {
+        holder_display_name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -138,10 +144,7 @@ pub fn advance_selection(
 pub async fn load_folder_tree(conn: &libsql::Connection) -> Result<Vec<FolderRow>> {
     let mut all_rows = Vec::new();
     let mut rows = conn
-        .query(
-            "SELECT id, parent_id, name FROM folders ORDER BY name",
-            (),
-        )
+        .query("SELECT id, parent_id, name FROM folders ORDER BY name", ())
         .await
         .context("loading folder tree")?;
     while let Some(row) = rows.next().await? {
@@ -263,10 +266,7 @@ pub async fn load_detail(
         )
         .await
         .context("loading detail row")?;
-    let row = rows
-        .next()
-        .await?
-        .context("no variant row")?;
+    let row = rows.next().await?.context("no variant row")?;
 
     let photo_id: String = row.get(0)?;
     let exif = ExifSummary {
@@ -537,13 +537,12 @@ pub async fn create_virtual_copy(
             [photo_id],
         )
         .await?;
-    let (parent_json, parent_version): (String, i64) = if let Some(parent_row) =
-        parent_rows.next().await?
-    {
-        (parent_row.get(0)?, parent_row.get(1)?)
-    } else {
-        ("{}".to_string(), 1)
-    };
+    let (parent_json, parent_version): (String, i64) =
+        if let Some(parent_row) = parent_rows.next().await? {
+            (parent_row.get(0)?, parent_row.get(1)?)
+        } else {
+            ("{}".to_string(), 1)
+        };
 
     let new_id = uuid_v4_hex();
     let now_ms = now_unix_ms();
@@ -584,11 +583,7 @@ pub async fn http_acquire_lock(
         "{}/locks/{variant_id}",
         server_base_url.trim_end_matches('/')
     );
-    let response = client
-        .post(&url)
-        .send()
-        .await
-        .context("POST /locks/:id")?;
+    let response = client.post(&url).send().await.context("POST /locks/:id")?;
     match response.status().as_u16() {
         200 => Ok(LockAcquireOutcome::Acquired),
         409 => Ok(LockAcquireOutcome::AlreadyHeld),
@@ -605,11 +600,7 @@ pub async fn http_heartbeat_lock(
         "{}/locks/{variant_id}",
         server_base_url.trim_end_matches('/')
     );
-    let response = client
-        .put(&url)
-        .send()
-        .await
-        .context("PUT /locks/:id")?;
+    let response = client.put(&url).send().await.context("PUT /locks/:id")?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -721,7 +712,10 @@ mod tests {
     }
 
     async fn open_test_conn() -> libsql::Connection {
-        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let db = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         conn.execute_batch(
             "CREATE TABLE folders (
@@ -831,13 +825,22 @@ mod tests {
     }
 
     async fn open_full_conn() -> libsql::Connection {
-        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let db = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .unwrap();
         let conn = db.connect().unwrap();
         seed_full_schema(&conn).await;
         conn
     }
 
-    async fn insert_photo(conn: &libsql::Connection, photo_id: &str, folder_id: &str, path: &str, captured_at: i64) {
+    async fn insert_photo(
+        conn: &libsql::Connection,
+        photo_id: &str,
+        folder_id: &str,
+        path: &str,
+        captured_at: i64,
+    ) {
         conn.execute("INSERT INTO photos(id, file_size, file_format, captured_at, imported_at) VALUES(?1, 100, 'PEF', ?2, 0)", (photo_id, captured_at)).await.unwrap();
         conn.execute("INSERT INTO photo_files(id, photo_id, folder_id, path, file_mtime, last_seen_at) VALUES(?1, ?2, ?3, ?4, 0, 0)",
             (format!("{photo_id}-file"), photo_id, folder_id, path)).await.unwrap();
@@ -850,14 +853,21 @@ mod tests {
                 develop_updated_at, develop_updated_by)
              VALUES(?1, ?2, ?3, 'u1', 0, '{}', 1, 0, 'u1')",
             (id, photo_id, idx),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
     #[allow(clippy::too_many_lines)]
     async fn load_grid_returns_one_cell_per_variant_in_folder() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_variant(&conn, "v1", "p1", 0).await;
         insert_variant(&conn, "v2", "p1", 1).await;
@@ -877,12 +887,27 @@ mod tests {
     #[tokio::test]
     async fn load_detail_returns_exif_rating_and_keywords() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
-        conn.execute("UPDATE photos SET camera_make='Pentax', camera_model='K-1', iso=400 WHERE id='p1'", ()).await.unwrap();
+        conn.execute(
+            "UPDATE photos SET camera_make='Pentax', camera_model='K-1', iso=400 WHERE id='p1'",
+            (),
+        )
+        .await
+        .unwrap();
         insert_variant(&conn, "v1", "p1", 0).await;
         conn.execute("INSERT INTO variant_user_state(variant_id, user_id, rating, updated_at) VALUES('v1','u1', 4, 0)", ()).await.unwrap();
-        conn.execute("INSERT INTO keywords(id, name, created_at) VALUES('k1', 'landscape', 0)", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO keywords(id, name, created_at) VALUES('k1', 'landscape', 0)",
+            (),
+        )
+        .await
+        .unwrap();
         conn.execute("INSERT INTO photo_keywords(photo_id, keyword_id, added_by, added_at) VALUES('p1','k1','u1',0)", ()).await.unwrap();
 
         let detail = load_detail(&conn, "v1", "u1").await.unwrap();
@@ -896,14 +921,23 @@ mod tests {
     #[tokio::test]
     async fn load_detail_returns_zero_rating_when_no_user_state() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_variant(&conn, "v1", "p1", 0).await;
         let detail = load_detail(&conn, "v1", "u1").await.unwrap();
         assert_eq!(detail.rating, 0);
     }
 
-    fn snapshot(holder: &str, holder_name: &str, requester: Option<(&str, &str)>) -> LockRowSnapshot {
+    fn snapshot(
+        holder: &str,
+        holder_name: &str,
+        requester: Option<(&str, &str)>,
+    ) -> LockRowSnapshot {
         LockRowSnapshot {
             holder_user_id: holder.into(),
             holder_display_name: holder_name.into(),
@@ -920,7 +954,10 @@ mod tests {
     #[test]
     fn lock_status_held_by_you_when_you_hold() {
         let snap = snapshot("me", "Me", None);
-        assert_eq!(lock_status_from_row(Some(&snap), "me"), LockStatus::HeldByYou);
+        assert_eq!(
+            lock_status_from_row(Some(&snap), "me"),
+            LockStatus::HeldByYou
+        );
     }
 
     #[test]
@@ -928,7 +965,9 @@ mod tests {
         let snap = snapshot("alice", "Alice", None);
         assert_eq!(
             lock_status_from_row(Some(&snap), "me"),
-            LockStatus::HeldByOther { holder_display_name: "Alice".into() }
+            LockStatus::HeldByOther {
+                holder_display_name: "Alice".into()
+            }
         );
     }
 
@@ -937,7 +976,9 @@ mod tests {
         let snap = snapshot("me", "Me", Some(("alice", "Alice")));
         assert_eq!(
             lock_status_from_row(Some(&snap), "me"),
-            LockStatus::HeldByYouTakeoverPending { requested_by_display_name: "Alice".into() }
+            LockStatus::HeldByYouTakeoverPending {
+                requested_by_display_name: "Alice".into()
+            }
         );
     }
 
@@ -946,14 +987,21 @@ mod tests {
         let snap = snapshot("alice", "Alice", Some(("me", "Me")));
         assert_eq!(
             lock_status_from_row(Some(&snap), "me"),
-            LockStatus::HeldByOtherTakeoverPending { holder_display_name: "Alice".into() }
+            LockStatus::HeldByOtherTakeoverPending {
+                holder_display_name: "Alice".into()
+            }
         );
     }
 
     #[tokio::test]
     async fn upsert_rating_inserts_then_updates() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_variant(&conn, "v1", "p1", 0).await;
 
@@ -969,7 +1017,12 @@ mod tests {
     #[tokio::test]
     async fn add_keyword_creates_and_attaches() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
 
         let id = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
@@ -983,7 +1036,12 @@ mod tests {
     #[tokio::test]
     async fn add_keyword_twice_resolves_to_same_id() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_photo(&conn, "p2", "f1", "/x/two.pef", 200).await;
         let id_a = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
@@ -994,7 +1052,12 @@ mod tests {
     #[tokio::test]
     async fn remove_keyword_detaches_only_specified_pair() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_variant(&conn, "v1", "p1", 0).await;
         let id = add_keyword(&conn, "p1", "u1", "trees").await.unwrap();
@@ -1006,7 +1069,12 @@ mod tests {
     #[tokio::test]
     async fn create_virtual_copy_appends_next_index() {
         let conn = open_full_conn().await;
-        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        conn.execute(
+            "INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')",
+            (),
+        )
+        .await
+        .unwrap();
         insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
         insert_variant(&conn, "v1", "p1", 0).await;
 

@@ -215,13 +215,10 @@ async fn library_lock_walks_through_all_four_states() {
     replica_b.sync().await.expect("bob post-seed sync");
 
     // ---- State 1: Free initially.
-    let alice_status = shoebox_client::library_state::load_lock_status(
-        &conn_a,
-        &variant_id,
-        &alice_user_id,
-    )
-    .await
-    .unwrap();
+    let alice_status =
+        shoebox_client::library_state::load_lock_status(&conn_a, &variant_id, &alice_user_id)
+            .await
+            .unwrap();
     assert_eq!(alice_status, LockStatus::Free, "alice initial state");
     let bob_status =
         shoebox_client::library_state::load_lock_status(&conn_b, &variant_id, &bob_user_id)
@@ -230,24 +227,18 @@ async fn library_lock_walks_through_all_four_states() {
     assert_eq!(bob_status, LockStatus::Free, "bob initial state");
 
     // ---- State 2: Alice acquires.
-    let acquire_outcome = shoebox_client::library_state::http_acquire_lock(
-        &alice_client,
-        &server_url,
-        &variant_id,
-    )
-    .await
-    .unwrap();
+    let acquire_outcome =
+        shoebox_client::library_state::http_acquire_lock(&alice_client, &server_url, &variant_id)
+            .await
+            .unwrap();
     assert_eq!(acquire_outcome, LockAcquireOutcome::Acquired);
     replica_a.sync().await.expect("alice sync after acquire");
     replica_b.sync().await.expect("bob sync after acquire");
 
-    let alice_status = shoebox_client::library_state::load_lock_status(
-        &conn_a,
-        &variant_id,
-        &alice_user_id,
-    )
-    .await
-    .unwrap();
+    let alice_status =
+        shoebox_client::library_state::load_lock_status(&conn_a, &variant_id, &alice_user_id)
+            .await
+            .unwrap();
     assert_eq!(alice_status, LockStatus::HeldByYou, "alice after acquire");
     let bob_status =
         shoebox_client::library_state::load_lock_status(&conn_b, &variant_id, &bob_user_id)
@@ -268,13 +259,10 @@ async fn library_lock_walks_through_all_four_states() {
     replica_a.sync().await.expect("alice sync after takeover");
     replica_b.sync().await.expect("bob sync after takeover");
 
-    let alice_status = shoebox_client::library_state::load_lock_status(
-        &conn_a,
-        &variant_id,
-        &alice_user_id,
-    )
-    .await
-    .unwrap();
+    let alice_status =
+        shoebox_client::library_state::load_lock_status(&conn_a, &variant_id, &alice_user_id)
+            .await
+            .unwrap();
     assert_eq!(
         alice_status,
         LockStatus::HeldByYouTakeoverPending {
@@ -301,13 +289,10 @@ async fn library_lock_walks_through_all_four_states() {
     replica_a.sync().await.expect("alice sync after release");
     replica_b.sync().await.expect("bob sync after release");
 
-    let alice_status = shoebox_client::library_state::load_lock_status(
-        &conn_a,
-        &variant_id,
-        &alice_user_id,
-    )
-    .await
-    .unwrap();
+    let alice_status =
+        shoebox_client::library_state::load_lock_status(&conn_a, &variant_id, &alice_user_id)
+            .await
+            .unwrap();
     assert_eq!(alice_status, LockStatus::Free, "alice after release");
     let bob_status =
         shoebox_client::library_state::load_lock_status(&conn_b, &variant_id, &bob_user_id)

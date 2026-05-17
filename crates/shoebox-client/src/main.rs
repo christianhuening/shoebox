@@ -1005,9 +1005,7 @@ async fn load_library_stats(
 fn command_for_folder_tree(replica: Arc<Replica>) -> iced::Task<Message> {
     iced::Task::perform(
         async move {
-            let conn = replica
-                .conn()
-                .map_err(|conn_err| conn_err.to_string())?;
+            let conn = replica.conn().map_err(|conn_err| conn_err.to_string())?;
             shoebox_client::library_state::load_folder_tree(&conn)
                 .await
                 .map_err(|tree_err| tree_err.to_string())
@@ -1028,9 +1026,7 @@ fn command_for_grid(state: &AppState, folder_id: String) -> iced::Task<Message> 
     };
     iced::Task::perform(
         async move {
-            let conn = replica
-                .conn()
-                .map_err(|conn_err| conn_err.to_string())?;
+            let conn = replica.conn().map_err(|conn_err| conn_err.to_string())?;
             shoebox_client::library_state::load_grid_for_folder(&conn, &folder_id, &user_id)
                 .await
                 .map_err(|grid_err| grid_err.to_string())

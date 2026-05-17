@@ -1,9 +1,7 @@
 //! Center-pane: photo grid as a wrapping row of fixed 256 px tiles.
 
 use iced::widget::image::{Handle, Image};
-use iced::widget::{
-    button, column as col, container, row, scrollable, text, Column, Row,
-};
+use iced::widget::{button, column as col, container, row, scrollable, text, Column, Row};
 use iced::{Color, Element, Length, Padding};
 
 use crate::library_state::GridCell;
@@ -43,11 +41,7 @@ fn tile(cell: &GridCell, selected: bool, index: usize) -> Element<'_, Message> {
     let image: Element<Message> = match &cell.thumbnail {
         Some(image) => {
             let rgba = image.to_rgba8();
-            let handle = Handle::from_rgba(
-                rgba.width(),
-                rgba.height(),
-                rgba.into_raw(),
-            );
+            let handle = Handle::from_rgba(rgba.width(), rgba.height(), rgba.into_raw());
             Image::new(handle)
                 .width(Length::Fixed(TILE_PX))
                 .height(Length::Fixed(TILE_PX))
