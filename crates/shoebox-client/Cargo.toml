@@ -1,0 +1,45 @@
+[package]
+name = "shoebox-client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "shoebox_client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shoebox-client"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+shoebox-common = { path = "../shoebox-common" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+reqwest = { workspace = true }
+libsql = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+mdns-sd = { workspace = true }
+hex = { workspace = true }
+time = { workspace = true }
+iced = { workspace = true }
+keyring = { workspace = true }
+directories = { workspace = true }
+futures-util = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+which = "6"
