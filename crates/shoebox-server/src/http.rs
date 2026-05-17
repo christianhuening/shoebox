@@ -37,6 +37,7 @@ pub fn public_router(state: AppState) -> Router {
         .merge(crate::enroll::renew_route())
         .merge(crate::whoami::route())
         .merge(crate::proxy::routes())
+        .merge(crate::thumbs_http::routes())
         .with_state(state)
 }
 

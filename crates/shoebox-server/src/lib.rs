@@ -19,5 +19,6 @@ pub mod revoke;
 pub mod secret;
 pub mod sqld_embed;
 pub mod thumbnailer;
+pub mod thumbs_http;
 pub mod tls_server;
 pub mod whoami;
