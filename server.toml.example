@@ -1,0 +1,5 @@
+server_name = "shoebox-dev"
+bind_addr = "127.0.0.1:9000"
+data_dir = "./data"
+photos_dir = "./photos"
+cache_dir = "./cache"

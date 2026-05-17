@@ -40,6 +40,41 @@ impl Config {
     }
 }
 
+impl Config {
+    pub fn load_from_path(path: &std::path::Path) -> anyhow::Result<Self> {
+        let s = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("reading config {path:?}: {e}"))?;
+        Ok(Self::from_toml_str(&s)?.apply_env_overrides())
+    }
+
+    /// Build a Config from environment variables alone, with sensible
+    /// defaults for any not set. Used when no `server.toml` is present.
+    pub fn from_env_with_defaults() -> Self {
+        Self {
+            server_name: std::env::var("SHOEBOX_SERVER_NAME")
+                .unwrap_or_else(|_| {
+                    hostname::get()
+                        .ok()
+                        .and_then(|h| h.into_string().ok())
+                        .unwrap_or_else(|| "shoebox".to_string())
+                }),
+            bind_addr: std::env::var("SHOEBOX_BIND_ADDR")
+                .unwrap_or_else(|_| "0.0.0.0:9000".into())
+                .parse()
+                .expect("SHOEBOX_BIND_ADDR must parse as SocketAddr"),
+            data_dir: std::path::PathBuf::from(
+                std::env::var("SHOEBOX_DATA_DIR").unwrap_or_else(|_| "/var/lib/shoebox".into()),
+            ),
+            photos_dir: std::path::PathBuf::from(
+                std::env::var("SHOEBOX_PHOTOS_DIR").unwrap_or_else(|_| "/photos".into()),
+            ),
+            cache_dir: std::path::PathBuf::from(
+                std::env::var("SHOEBOX_CACHE_DIR").unwrap_or_else(|_| "/shoebox-cache".into()),
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
