@@ -133,6 +133,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migration_0006_creates_collection_tables() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        for table in ["collections", "collection_members"] {
+            let mut rows = conn
+                .query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name = ?1",
+                    [table],
+                )
+                .await
+                .unwrap();
+            assert!(
+                rows.next().await.unwrap().is_some(),
+                "table {table} should exist after migration 0006"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn all_six_migrations_applied_in_order() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT version FROM _schema_migrations ORDER BY version",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut versions = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            versions.push(row.get::<i64>(0).unwrap());
+        }
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[tokio::test]
     async fn migration_0005_creates_keyword_tables() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("catalog.db");
