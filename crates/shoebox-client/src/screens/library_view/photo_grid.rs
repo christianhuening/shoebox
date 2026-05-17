@@ -13,7 +13,7 @@ const TILE_PX: f32 = 256.0;
 const TILE_PAD: f32 = 8.0;
 
 #[must_use]
-pub fn view<'a>(cells: &'a [GridCell], selected: Option<usize>) -> Element<'a, Message> {
+pub fn view(cells: &[GridCell], selected: Option<usize>) -> Element<'_, Message> {
     if cells.is_empty() {
         return container(text("(no photos)")).padding(20).into();
     }
@@ -60,7 +60,7 @@ fn tile(cell: &GridCell, selected: bool, index: usize) -> Element<'_, Message> {
             .center_y(Length::Fill)
             .into(),
     };
-    let stars = star_row(cell.variant_id.clone(), cell.rating);
+    let stars = star_row(&cell.variant_id, cell.rating);
     let label = text(&cell.display_name).size(12);
     let inner = col![image, label, stars].spacing(4).padding(TILE_PAD);
     let bg = if selected {
@@ -77,11 +77,11 @@ fn tile(cell: &GridCell, selected: bool, index: usize) -> Element<'_, Message> {
     .into()
 }
 
-fn star_row(variant_id: String, rating: u8) -> Element<'static, Message> {
+fn star_row(variant_id: &str, rating: u8) -> Element<'static, Message> {
     let mut star_row: Row<Message> = row![].spacing(2);
     for star_index in 1u8..=5 {
         let glyph = if star_index <= rating { "★" } else { "☆" };
-        let vid = variant_id.clone();
+        let vid = variant_id.to_string();
         star_row = star_row.push(
             button(text(glyph))
                 .on_press(Message::LibraryRatingChanged {

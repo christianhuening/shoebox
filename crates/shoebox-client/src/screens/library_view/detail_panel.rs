@@ -43,22 +43,19 @@ fn detail_body<'a>(
         (Some(width), Some(height)) => format!("{width}×{height}"),
         _ => "—".into(),
     };
+    #[allow(clippy::cast_precision_loss)]
     let shutter = exif
         .shutter_us
-        .map(|us| format!("1/{:.0}s", 1_000_000.0 / us as f64))
-        .unwrap_or_else(|| "—".into());
+        .map_or_else(|| "—".into(), |us| format!("1/{:.0}s", 1_000_000.0 / us as f64));
     let aperture = exif
         .aperture
-        .map(|f| format!("f/{f:.1}"))
-        .unwrap_or_else(|| "—".into());
+        .map_or_else(|| "—".into(), |f| format!("f/{f:.1}"));
     let iso = exif
         .iso
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "—".into());
+        .map_or_else(|| "—".into(), |n| n.to_string());
     let focal = exif
         .focal_length_mm
-        .map(|f| format!("{f:.0}mm"))
-        .unwrap_or_else(|| "—".into());
+        .map_or_else(|| "—".into(), |f| format!("{f:.0}mm"));
 
     let exif_block = col![
         text("EXIF").size(16),
