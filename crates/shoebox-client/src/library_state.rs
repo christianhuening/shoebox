@@ -303,6 +303,73 @@ pub async fn load_detail(
     })
 }
 
+/// Inputs needed by the pure decoder to produce a `LockStatus`.
+#[derive(Debug, Clone)]
+pub struct LockRowSnapshot {
+    pub holder_user_id: String,
+    pub holder_display_name: String,
+    pub takeover_requested_by: Option<String>,
+    pub takeover_requested_by_display_name: Option<String>,
+}
+
+#[must_use]
+#[allow(clippy::match_same_arms)]
+pub fn lock_status_from_row(row: Option<&LockRowSnapshot>, current_user_id: &str) -> LockStatus {
+    let Some(row) = row else {
+        return LockStatus::Free;
+    };
+    let i_hold = row.holder_user_id == current_user_id;
+    let takeover_by_me = row.takeover_requested_by.as_deref() == Some(current_user_id);
+    match (i_hold, row.takeover_requested_by.is_some()) {
+        (true, true) => LockStatus::HeldByYouTakeoverPending {
+            requested_by_display_name: row
+                .takeover_requested_by_display_name
+                .clone()
+                .unwrap_or_default(),
+        },
+        (true, false) => LockStatus::HeldByYou,
+        (false, true) if takeover_by_me => LockStatus::HeldByOtherTakeoverPending {
+            holder_display_name: row.holder_display_name.clone(),
+        },
+        (false, true) => LockStatus::HeldByOther {
+            holder_display_name: row.holder_display_name.clone(),
+        },
+        (false, false) => LockStatus::HeldByOther {
+            holder_display_name: row.holder_display_name.clone(),
+        },
+    }
+}
+
+pub async fn load_lock_status(
+    conn: &libsql::Connection,
+    variant_id: &str,
+    current_user_id: &str,
+) -> Result<LockStatus> {
+    let mut rows = conn
+        .query(
+            "SELECT dl.user_id, holder.display_name,
+                    dl.takeover_requested_by, requester.display_name
+             FROM develop_locks dl
+             JOIN users holder ON holder.id = dl.user_id
+             LEFT JOIN users requester ON requester.id = dl.takeover_requested_by
+             WHERE dl.variant_id = ?1",
+            [variant_id],
+        )
+        .await
+        .context("loading lock status")?;
+    let snap = if let Some(row) = rows.next().await? {
+        Some(LockRowSnapshot {
+            holder_user_id: row.get(0)?,
+            holder_display_name: row.get(1)?,
+            takeover_requested_by: row.get(2)?,
+            takeover_requested_by_display_name: row.get(3)?,
+        })
+    } else {
+        None
+    };
+    Ok(lock_status_from_row(snap.as_ref(), current_user_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,5 +603,52 @@ mod tests {
         insert_variant(&conn, "v1", "p1", 0).await;
         let detail = load_detail(&conn, "v1", "u1").await.unwrap();
         assert_eq!(detail.rating, 0);
+    }
+
+    fn snapshot(holder: &str, holder_name: &str, requester: Option<(&str, &str)>) -> LockRowSnapshot {
+        LockRowSnapshot {
+            holder_user_id: holder.into(),
+            holder_display_name: holder_name.into(),
+            takeover_requested_by: requester.map(|(id, _)| id.into()),
+            takeover_requested_by_display_name: requester.map(|(_, name)| name.into()),
+        }
+    }
+
+    #[test]
+    fn lock_status_free_when_no_row() {
+        assert_eq!(lock_status_from_row(None, "me"), LockStatus::Free);
+    }
+
+    #[test]
+    fn lock_status_held_by_you_when_you_hold() {
+        let snap = snapshot("me", "Me", None);
+        assert_eq!(lock_status_from_row(Some(&snap), "me"), LockStatus::HeldByYou);
+    }
+
+    #[test]
+    fn lock_status_held_by_other_when_other_holds() {
+        let snap = snapshot("alice", "Alice", None);
+        assert_eq!(
+            lock_status_from_row(Some(&snap), "me"),
+            LockStatus::HeldByOther { holder_display_name: "Alice".into() }
+        );
+    }
+
+    #[test]
+    fn lock_status_held_by_you_takeover_pending_when_you_hold_and_request_came() {
+        let snap = snapshot("me", "Me", Some(("alice", "Alice")));
+        assert_eq!(
+            lock_status_from_row(Some(&snap), "me"),
+            LockStatus::HeldByYouTakeoverPending { requested_by_display_name: "Alice".into() }
+        );
+    }
+
+    #[test]
+    fn lock_status_held_by_other_takeover_pending_when_you_requested() {
+        let snap = snapshot("alice", "Alice", Some(("me", "Me")));
+        assert_eq!(
+            lock_status_from_row(Some(&snap), "me"),
+            LockStatus::HeldByOtherTakeoverPending { holder_display_name: "Alice".into() }
+        );
     }
 }
