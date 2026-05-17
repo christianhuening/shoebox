@@ -11,3 +11,4 @@ pub mod logging;
 pub mod mdns;
 pub mod mtls;
 pub mod secret;
+pub mod whoami;

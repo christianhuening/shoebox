@@ -138,3 +138,52 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
+
+// ── /renew ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct RenewRequest {
+    pub csr_pem: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenewResponse {
+    pub client_cert_pem: String,
+    pub cert_serial_hex: String,
+    pub not_after_unix: i64,
+}
+
+pub fn renew_route() -> Router<AppState> {
+    Router::new().route("/renew", post(renew_handler))
+}
+
+/// Renew a client certificate. The caller must already hold a valid client
+/// cert (identity is extracted from the mTLS connection); no shared-secret
+/// validation is performed. The new cert carries the same `user_id` and
+/// `machine_id` as the existing one.
+async fn renew_handler(
+    State(state): State<AppState>,
+    identity: crate::identity::ClientIdentity,
+    Json(req): Json<RenewRequest>,
+) -> Result<(StatusCode, Json<RenewResponse>), (StatusCode, String)> {
+    let issued = sign_csr(&state.ca, &req.csr_pem, &identity.user_id, &identity.machine_id)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("csr: {e}")))?;
+
+    tracing::info!(
+        event = "renewal.completed",
+        user_id = %identity.user_id,
+        machine_id = %identity.machine_id,
+        old_serial = %identity.cert_serial_hex,
+        new_serial = %issued.serial_hex,
+        "client cert renewed"
+    );
+
+    Ok((
+        StatusCode::OK,
+        Json(RenewResponse {
+            client_cert_pem: issued.cert_pem,
+            cert_serial_hex: issued.serial_hex,
+            not_after_unix: issued.not_after.unix_timestamp(),
+        }),
+    ))
+}

@@ -21,11 +21,15 @@ pub struct HealthResponse {
     pub schema_version: i64,
 }
 
-/// Endpoints that require mTLS (gated by the TLS layer, not the router).
-/// In Task 8 this gains /enroll; in Task 11 it gains /whoami.
+/// Endpoints served over the mTLS listener.
+/// - /enroll — accepts unauthenticated requests (no client cert required)
+/// - /renew  — requires a valid client cert (`ClientIdentity` extractor enforces this)
+/// - /whoami — requires a valid client cert (`ClientIdentity` extractor enforces this)
 pub fn public_router(state: AppState) -> Router {
     Router::new()
         .merge(crate::enroll::route())
+        .merge(crate::enroll::renew_route())
+        .merge(crate::whoami::route())
         .with_state(state)
 }
 
