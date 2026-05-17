@@ -133,6 +133,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migration_0004_creates_variant_user_state() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='variant_user_state'",
+                (),
+            )
+            .await
+            .unwrap();
+        assert!(rows.next().await.unwrap().is_some());
+    }
+
+    #[tokio::test]
     async fn migration_0003_creates_variant_tables() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("catalog.db");
