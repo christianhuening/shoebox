@@ -91,7 +91,7 @@ async fn apply_migrations(conn: &Connection) -> Result<()> {
         conn.execute_batch(sql)
             .await
             .with_context(|| format!("applying migration {name} (version {version})"))?;
-        let now_ms = chrono_now_ms();
+        let now_ms = now_ms();
         conn.execute(
             "INSERT INTO _schema_migrations (version, applied_at) VALUES (?1, ?2)",
             (version, now_ms),
@@ -102,7 +102,7 @@ async fn apply_migrations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn chrono_now_ms() -> i64 {
+fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

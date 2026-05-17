@@ -21,8 +21,14 @@ impl Config {
     #[must_use]
     pub fn apply_env_overrides(mut self) -> Self {
         if let Ok(v) = std::env::var("SHOEBOX_BIND_ADDR") {
-            if let Ok(addr) = v.parse() {
-                self.bind_addr = addr;
+            match v.parse() {
+                Ok(addr) => self.bind_addr = addr,
+                Err(e) => tracing::warn!(
+                    event = "config.bind_addr.invalid",
+                    value = %v,
+                    error = %e,
+                    "SHOEBOX_BIND_ADDR could not be parsed; keeping value from config"
+                ),
             }
         }
         if let Ok(v) = std::env::var("SHOEBOX_DATA_DIR") {

@@ -39,7 +39,8 @@ impl MdnsBroadcaster {
             port,
             Some(txt),
         )
-        .context("building ServiceInfo")?;
+        .context("building ServiceInfo")?
+        .enable_addr_auto();
 
         daemon.register(info).context("registering mdns service")?;
         tracing::info!(
@@ -72,11 +73,11 @@ fn sanitize(name: &str) -> String {
         .collect()
 }
 
-/// Enumerate non-loopback IPs from local network interfaces.
+/// Address enumeration is handled by mdns-sd's `enable_addr_auto()` on the
+/// `ServiceInfo`; we don't need to enumerate ourselves. Kept as a function
+/// so future plans can override (e.g. to restrict broadcast to specific
+/// interfaces).
 #[must_use]
 pub fn local_ips() -> Vec<IpAddr> {
-    // Use `if_addrs` for cross-platform interface enumeration.
-    // For now keep it minimal: read from std until we add the dep.
-    // mdns-sd accepts an empty list and will try to use all interfaces.
     Vec::new()
 }
