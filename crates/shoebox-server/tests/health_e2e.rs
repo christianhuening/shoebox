@@ -1,5 +1,4 @@
-//! End-to-end test: spawn the server's components in-process, hit
-//! /health over loopback, verify response.
+//! End-to-end test for the /health listener (plain HTTP on loopback).
 
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -24,7 +23,7 @@ async fn full_server_serves_health() {
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel();
 
-    let app = shoebox_server::http::router(state);
+    let app = shoebox_server::http::health_router(state);
     let server = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {

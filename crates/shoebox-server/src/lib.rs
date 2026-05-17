@@ -7,4 +7,5 @@ pub mod db;
 pub mod http;
 pub mod logging;
 pub mod mdns;
+pub mod mtls;
 pub mod secret;

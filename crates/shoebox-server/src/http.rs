@@ -1,11 +1,10 @@
-//! HTTP server: router construction and request handlers.
+//! HTTP routers. `public_router` carries auth-required endpoints and is
+//! served over mTLS; `health_router` carries only /health and is served
+//! over plain HTTP on a loopback-only port.
 
 use axum::{extract::State, http::StatusCode, response::Json, routing::get, Router};
 use serde::Serialize;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::oneshot;
 
 use crate::db::Db;
 
@@ -21,7 +20,15 @@ pub struct HealthResponse {
     pub schema_version: i64,
 }
 
-pub fn router(state: AppState) -> Router {
+/// Endpoints that require mTLS (gated by the TLS layer, not the router).
+/// In Task 8 this gains /enroll; in Task 11 it gains /whoami.
+pub fn public_router(state: AppState) -> Router {
+    Router::new().with_state(state)
+}
+
+/// Plain-HTTP /health endpoint for container/k8s healthchecks. Bound to
+/// loopback only; never exposed off-host.
+pub fn health_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .with_state(state)
@@ -37,27 +44,11 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRespon
     )
 }
 
-/// Bind and serve the router until `shutdown` resolves.
-pub async fn serve(
-    addr: SocketAddr,
-    state: AppState,
-    shutdown: oneshot::Receiver<()>,
-) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    let actual = listener.local_addr()?;
-    tracing::info!(event = "http.listen", addr = %actual, "HTTP server bound");
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(async move {
-            let _ = shutdown.await;
-        })
-        .await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use tokio::net::TcpListener;
     use tokio::sync::oneshot;
 
     #[tokio::test]
@@ -74,7 +65,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = oneshot::channel();
 
-        let app = router(state);
+        let app = health_router(state);
         let server = tokio::spawn(async move {
             axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
