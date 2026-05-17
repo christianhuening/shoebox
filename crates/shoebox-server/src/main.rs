@@ -1,5 +1,5 @@
 use shoebox_server::{
-    ca, cli, config, db, http, logging, mdns, mtls, revoke, secret, sqld_embed, tls_server,
+    ca, cli, config, db, http, indexer, logging, mdns, mtls, revoke, secret, sqld_embed, tls_server,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -96,6 +96,12 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     // not reached due to an early error return.
     let embedded_sqld = sqld_embed::start(cfg.data_dir.clone()).await?;
 
+    // Initial scan + live watcher (see `start_indexer`). Missing photos
+    // directory is treated as a no-op — both bindings stay `None` and the
+    // shutdown block below is a no-op for the indexer.
+    let (mut indexer_shutdown_tx, mut indexer_task) =
+        start_indexer(db.clone(), &cfg.photos_dir).await?;
+
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
@@ -131,9 +137,58 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
 
     let result = tls_server::serve_public_tls(cfg.bind_addr, state, tls_cfg, shutdown_rx).await;
     let _ = shutdown_health_tx.send(());
+    if let Some(tx) = indexer_shutdown_tx.take() {
+        let _ = tx.send(());
+    }
+    if let Some(task) = indexer_task.take() {
+        let _ = task.await;
+    }
     broadcaster.shutdown();
     embedded_sqld.shutdown().await;
     result
+}
+
+/// Run the initial photo-library scan and spawn the live FS watcher.
+///
+/// If `photos_root` does not exist (e.g. a fresh install before the NAS
+/// share is mounted), both the scan and the watcher are skipped with a
+/// warning and `(None, None)` is returned so the caller's shutdown block
+/// becomes a no-op for the indexer. Otherwise returns the watcher's
+/// shutdown channel and `JoinHandle` so the caller can stop it on
+/// shutdown.
+async fn start_indexer(
+    db: Arc<db::Db>,
+    photos_root: &std::path::Path,
+) -> anyhow::Result<(
+    Option<oneshot::Sender<()>>,
+    Option<tokio::task::JoinHandle<()>>,
+)> {
+    if !photos_root.exists() {
+        tracing::warn!(
+            event = "indexer.skip",
+            photos_dir = %photos_root.display(),
+            "photos directory does not exist; skipping initial scan and live watcher"
+        );
+        return Ok((None, None));
+    }
+    let scan_stats = indexer::initial_scan(db.clone(), photos_root).await?;
+    tracing::info!(
+        event = "indexer.initial_scan",
+        folders_seen = scan_stats.folders_seen,
+        files_seen = scan_stats.files_seen,
+        photos_added = scan_stats.photos_added,
+        photo_files_added = scan_stats.photo_files_added,
+        "initial scan complete"
+    );
+    let (watcher_shutdown_tx, watcher_shutdown_rx) = oneshot::channel();
+    let indexer_db = db;
+    let indexer_root = photos_root.to_path_buf();
+    let watcher_task = tokio::spawn(async move {
+        if let Err(e) = indexer::run_watcher(indexer_db, indexer_root, watcher_shutdown_rx).await {
+            tracing::error!(event = "indexer.run.error", error = %e);
+        }
+    });
+    Ok((Some(watcher_shutdown_tx), Some(watcher_task)))
 }
 
 async fn serve_health(
