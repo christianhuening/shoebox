@@ -33,6 +33,16 @@ libsql = { workspace = true }
 mdns-sd = { workspace = true }
 include_dir = { workspace = true }
 hostname = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = { workspace = true }
+axum-server = { workspace = true }
+argon2 = { workspace = true }
+clap = { workspace = true }
+x509-parser = { workspace = true }
+time = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
