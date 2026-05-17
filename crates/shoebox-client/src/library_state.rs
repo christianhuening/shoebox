@@ -4,7 +4,6 @@
 //! All reads/writes use a fresh `libsql::Connection` per call (cheap;
 //! the underlying `Database` is shared).
 
-#[allow(unused_imports)]
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -117,6 +116,58 @@ pub fn advance_selection(
     Some(next)
 }
 
+/// Load all folders into a depth-first flat-indented list (roots first,
+/// each subtree expanded inline before the next root).
+pub async fn load_folder_tree(conn: &libsql::Connection) -> Result<Vec<FolderRow>> {
+    let mut all_rows = Vec::new();
+    let mut rows = conn
+        .query(
+            "SELECT id, parent_id, name FROM folders ORDER BY name",
+            (),
+        )
+        .await
+        .context("loading folder tree")?;
+    while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        let parent_id: Option<String> = row.get(1)?;
+        let name: String = row.get(2)?;
+        all_rows.push((id, parent_id, name));
+    }
+    Ok(flatten_folders(&all_rows))
+}
+
+fn flatten_folders(raw: &[(String, Option<String>, String)]) -> Vec<FolderRow> {
+    use std::collections::HashMap;
+    type RawRow = (String, Option<String>, String);
+    type ChildMap<'m> = HashMap<Option<String>, Vec<&'m RawRow>>;
+    let mut children: ChildMap<'_> = HashMap::new();
+    for row in raw {
+        children.entry(row.1.clone()).or_default().push(row);
+    }
+    let mut out = Vec::with_capacity(raw.len());
+    #[allow(clippy::items_after_statements)]
+    fn walk<'a>(
+        parent: Option<&'a String>,
+        depth: usize,
+        children: &ChildMap<'a>,
+        out: &mut Vec<FolderRow>,
+    ) {
+        let key = parent.cloned();
+        if let Some(group) = children.get(&key) {
+            for row in group {
+                out.push(FolderRow {
+                    id: row.0.clone(),
+                    name: row.2.clone(),
+                    depth,
+                });
+                walk(Some(&row.0), depth + 1, children, out);
+            }
+        }
+    }
+    walk(None, 0, &children, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +217,52 @@ mod tests {
         assert_eq!(
             advance_selection(Some(0), 0, 4, NavigationDirection::Right),
             None
+        );
+    }
+
+    async fn open_test_conn() -> libsql::Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE folders (
+                id TEXT PRIMARY KEY,
+                parent_id TEXT REFERENCES folders(id),
+                path TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                last_indexed_at INTEGER
+            );",
+        )
+        .await
+        .unwrap();
+        conn
+    }
+
+    #[tokio::test]
+    async fn load_folder_tree_returns_flat_indented_order() {
+        let conn = open_test_conn().await;
+        for (id, parent, path, name) in [
+            ("a", None, "/a", "alpha"),
+            ("b", Some("a"), "/a/b", "bravo"),
+            ("c", Some("a"), "/a/c", "charlie"),
+            ("d", None, "/d", "delta"),
+        ] {
+            conn.execute(
+                "INSERT INTO folders(id, parent_id, path, name) VALUES (?1, ?2, ?3, ?4)",
+                (id, parent, path, name),
+            )
+            .await
+            .unwrap();
+        }
+        let tree = load_folder_tree(&conn).await.unwrap();
+        let summary: Vec<_> = tree.iter().map(|r| (r.name.clone(), r.depth)).collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("alpha".to_string(), 0),
+                ("bravo".to_string(), 1),
+                ("charlie".to_string(), 1),
+                ("delta".to_string(), 0),
+            ]
         );
     }
 }
