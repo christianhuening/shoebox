@@ -133,6 +133,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migration_0002_creates_file_tables() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        for table in ["folders", "photos", "photo_files"] {
+            let mut rows = conn
+                .query(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name = ?1",
+                    [table],
+                )
+                .await
+                .unwrap();
+            assert!(
+                rows.next().await.unwrap().is_some(),
+                "table {table} should exist after migration 0002"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn migration_0001_creates_identity_tables() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("catalog.db");
