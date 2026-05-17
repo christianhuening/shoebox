@@ -13,6 +13,7 @@ pub mod logging;
 pub mod mdns;
 pub mod mtls;
 pub mod proxy;
+pub mod raw_preview;
 pub mod revoke;
 pub mod secret;
 pub mod sqld_embed;
