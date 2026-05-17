@@ -370,6 +370,38 @@ pub async fn load_lock_status(
     Ok(lock_status_from_row(snap.as_ref(), current_user_id))
 }
 
+/// Insert-or-update the per-(variant, user) rating.
+pub async fn upsert_rating(
+    conn: &libsql::Connection,
+    variant_id: &str,
+    user_id: &str,
+    rating: u8,
+) -> Result<()> {
+    let now_ms = now_unix_ms();
+    let rating_int = i64::from(rating.clamp(0, 5));
+    conn.execute(
+        "INSERT INTO variant_user_state(variant_id, user_id, rating, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(variant_id, user_id)
+         DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at",
+        (variant_id, user_id, rating_int, now_ms),
+    )
+    .await
+    .context("upserting rating")?;
+    Ok(())
+}
+
+fn now_unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0),
+    )
+    .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +682,21 @@ mod tests {
             lock_status_from_row(Some(&snap), "me"),
             LockStatus::HeldByOtherTakeoverPending { holder_display_name: "Alice".into() }
         );
+    }
+
+    #[tokio::test]
+    async fn upsert_rating_inserts_then_updates() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_variant(&conn, "v1", "p1", 0).await;
+
+        upsert_rating(&conn, "v1", "u1", 3).await.unwrap();
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert_eq!(detail.rating, 3);
+
+        upsert_rating(&conn, "v1", "u1", 5).await.unwrap();
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert_eq!(detail.rating, 5);
     }
 }
