@@ -58,7 +58,7 @@ parking_lot = "0.12"
 # (Task 2) will be deferred to a git-dep or subprocess approach decided at Task 2 time.
 notify = "6"
 blake3 = "1"
-rawler = "0.6"
+rawler = "0.7"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 prometheus = { version = "0.13", default-features = false }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
