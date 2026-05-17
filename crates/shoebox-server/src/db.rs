@@ -33,7 +33,7 @@ impl Db {
             .map_err(|e| anyhow!("failed to connect to libSQL: {e}"))
     }
 
-    /// Insert a row into revoked_certs. `serial_hex` is the lowercase-hex
+    /// Insert a row into `revoked_certs`. `serial_hex` is the lowercase-hex
     /// serial number of the leaf cert being revoked.
     pub async fn insert_revoked_cert(
         &self,
