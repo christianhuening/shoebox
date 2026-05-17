@@ -15,6 +15,8 @@
 //! - `/v2/*path` — Hrana v2 pipeline + streaming (e.g. `/v2/pipeline`,
 //!   `/v2/pipeline?baton=...`, WebSocket upgrades on `/v2/streams`)
 
+use std::sync::OnceLock;
+
 use anyhow::Result;
 use axum::body::Body;
 use axum::extract::{Request, State, WebSocketUpgrade};
@@ -22,11 +24,22 @@ use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::Router;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client as HyperClient;
 use hyper_util::rt::TokioExecutor;
 
 use crate::http::AppState;
 use crate::identity::ClientIdentity;
+
+/// Process-wide hyper client for forwarding HTTP requests to the loopback
+/// `sqld` subprocess. Built once on first use so that the legacy hyper client's
+/// connection pool actually does its job — rebuilding per request would force a
+/// fresh TCP handshake on every `/v2/pipeline` POST and defeat keep-alive.
+static UPSTREAM_HTTP_CLIENT: OnceLock<HyperClient<HttpConnector, Body>> = OnceLock::new();
+
+fn upstream_http_client() -> &'static HyperClient<HttpConnector, Body> {
+    UPSTREAM_HTTP_CLIENT.get_or_init(|| HyperClient::builder(TokioExecutor::new()).build_http())
+}
 
 /// Build the `/v1/*` + `/v2/*` catch-all routes that forward to `sqld`.
 pub fn routes() -> Router<AppState> {
@@ -78,9 +91,7 @@ async fn forward_http(
     request_headers.remove(header::TRANSFER_ENCODING);
     request_headers.remove(header::UPGRADE);
 
-    let upstream_client: HyperClient<_, Body> =
-        HyperClient::builder(TokioExecutor::new()).build_http();
-    match upstream_client.request(req).await {
+    match upstream_http_client().request(req).await {
         Ok(upstream_response) => upstream_response.into_response(),
         Err(forward_error) => {
             tracing::warn!(event = "proxy.http.error", error = %forward_error);
@@ -107,40 +118,57 @@ async fn forward_ws(
         tokio_tungstenite::connect_async(upstream_url).await?;
     let (mut upstream_tx, mut upstream_rx) = upstream_socket.split();
 
-    loop {
-        tokio::select! {
-            client_to_upstream = client_socket.recv() => {
-                let Some(client_msg_result) = client_to_upstream else { break };
-                let client_msg = client_msg_result?;
-                let upstream_msg = match client_msg {
-                    AxumMessage::Text(text) => TungsteniteMessage::Text(text),
-                    AxumMessage::Binary(bytes) => TungsteniteMessage::Binary(bytes),
-                    AxumMessage::Ping(payload) => TungsteniteMessage::Ping(payload),
-                    AxumMessage::Pong(payload) => TungsteniteMessage::Pong(payload),
-                    AxumMessage::Close(_) => break,
-                };
-                upstream_tx.send(upstream_msg).await?;
+    // Run the bidirectional pump in an inner async block so we can perform
+    // unconditional best-effort graceful close on both sides afterwards,
+    // regardless of whether the pump exited cleanly or via an error.
+    let pump_result: Result<()> = async {
+        loop {
+            tokio::select! {
+                client_to_upstream = client_socket.recv() => {
+                    let Some(client_msg_result) = client_to_upstream else { break };
+                    let client_msg = client_msg_result?;
+                    let upstream_msg = match client_msg {
+                        AxumMessage::Text(text) => TungsteniteMessage::Text(text),
+                        AxumMessage::Binary(bytes) => TungsteniteMessage::Binary(bytes),
+                        AxumMessage::Ping(payload) => TungsteniteMessage::Ping(payload),
+                        AxumMessage::Pong(payload) => TungsteniteMessage::Pong(payload),
+                        AxumMessage::Close(_) => break,
+                    };
+                    upstream_tx.send(upstream_msg).await?;
+                }
+                upstream_to_client = upstream_rx.next() => {
+                    let Some(upstream_msg_result) = upstream_to_client else { break };
+                    let upstream_msg = upstream_msg_result?;
+                    let downstream_msg = match upstream_msg {
+                        TungsteniteMessage::Text(text) => AxumMessage::Text(text),
+                        TungsteniteMessage::Binary(bytes) => AxumMessage::Binary(bytes),
+                        TungsteniteMessage::Ping(payload) => AxumMessage::Ping(payload),
+                        TungsteniteMessage::Pong(payload) => AxumMessage::Pong(payload),
+                        TungsteniteMessage::Close(_) => break,
+                        // Raw frames are an internal tungstenite detail and not
+                        // emitted to library users; the maintainers recommend
+                        // ignoring them. See snapview/tungstenite-rs#268.
+                        TungsteniteMessage::Frame(_) => continue,
+                    };
+                    client_socket.send(downstream_msg).await?;
+                }
+                else => break,
             }
-            upstream_to_client = upstream_rx.next() => {
-                let Some(upstream_msg_result) = upstream_to_client else { break };
-                let upstream_msg = upstream_msg_result?;
-                let downstream_msg = match upstream_msg {
-                    TungsteniteMessage::Text(text) => AxumMessage::Text(text),
-                    TungsteniteMessage::Binary(bytes) => AxumMessage::Binary(bytes),
-                    TungsteniteMessage::Ping(payload) => AxumMessage::Ping(payload),
-                    TungsteniteMessage::Pong(payload) => AxumMessage::Pong(payload),
-                    TungsteniteMessage::Close(_) => break,
-                    // Raw frames are an internal tungstenite detail and not
-                    // emitted to library users; the maintainers recommend
-                    // ignoring them. See snapview/tungstenite-rs#268.
-                    TungsteniteMessage::Frame(_) => continue,
-                };
-                client_socket.send(downstream_msg).await?;
-            }
-            else => break,
         }
+        Ok(())
     }
-    Ok(())
+    .await;
+
+    // Best-effort graceful close in both directions so `sqld` and the client
+    // both see a proper WS Close frame rather than an abrupt TCP RST. Errors
+    // here are ignored — the peer may already be gone, and the original
+    // `pump_result` is the meaningful return value for the caller's logging.
+    let _ = upstream_tx.send(TungsteniteMessage::Close(None)).await;
+    let _ = upstream_tx.close().await;
+    let _ = client_socket.send(AxumMessage::Close(None)).await;
+    let _ = client_socket.close().await;
+
+    pump_result
 }
 
 /// Build an upstream URL for `sqld`, swapping the scheme to `ws[s]://` for
