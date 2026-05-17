@@ -1,7 +1,9 @@
-//! Filesystem indexer. This task (Task 7 of Plan 1.3) contributes the
-//! initial-scan path: walk the photo root, BLAKE3-hash every RAW file,
-//! populate `folders` + `photos` + `photo_files` rows. Task 8 will add
-//! the live `notify`-based FS watcher; Task 9 wires it into `main.rs`.
+//! Filesystem indexer. Task 7 of Plan 1.3 contributes the initial-scan
+//! path: walk the photo root, BLAKE3-hash every RAW file, populate
+//! `folders` + `photos` + `photo_files` rows. Task 8 adds the live
+//! `notify`-based FS watcher (`run_watcher`) that reacts to incremental
+//! create/modify/remove events using the same upsert logic. Task 9 wires
+//! both into `main.rs`.
 
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashSet;
@@ -293,6 +295,117 @@ fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// Run the live filesystem watcher loop. Returns only on error or shutdown.
+///
+/// Subscribes (recursively) to `photos_root` via the `notify` crate and
+/// reacts to create/modify/remove events by calling into the same upsert
+/// logic as [`initial_scan`]. The loop also terminates when `shutdown`
+/// resolves (or its sender is dropped), letting callers cleanly stop the
+/// watcher during server shutdown.
+///
+/// # Errors
+///
+/// Returns an error if the watcher cannot be constructed or fails to
+/// register a watch on `photos_root`. Per-event handler errors are logged
+/// at warn level and do not terminate the loop.
+pub async fn run_watcher(
+    db: Arc<Db>,
+    photos_root: PathBuf,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> Result<()> {
+    use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+    use tokio::sync::mpsc;
+
+    let (event_sender, mut event_receiver) =
+        mpsc::unbounded_channel::<notify::Result<notify::Event>>();
+    let mut watcher: RecommendedWatcher = notify::recommended_watcher(move |watch_result| {
+        let _ = event_sender.send(watch_result);
+    })?;
+    watcher.watch(&photos_root, RecursiveMode::Recursive)?;
+
+    tracing::info!(
+        event = "indexer.watcher.start",
+        photos_root = %photos_root.display(),
+        "filesystem watcher started"
+    );
+
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => {
+                tracing::info!(event = "indexer.watcher.shutdown");
+                break;
+            }
+            event_result = event_receiver.recv() => match event_result {
+                Some(Ok(event)) => {
+                    if let Err(handle_err) = handle_event(&db, &photos_root, &event).await {
+                        tracing::warn!(
+                            event = "indexer.handle.error",
+                            error = %handle_err
+                        );
+                    }
+                }
+                Some(Err(watcher_err)) => tracing::warn!(
+                    event = "indexer.watch.error",
+                    error = %watcher_err
+                ),
+                None => break,
+            }
+        }
+    }
+
+    // Keep the watcher alive until the end of the function so events are
+    // delivered for the entire loop lifetime.
+    drop(watcher);
+    Ok(())
+}
+
+async fn handle_event(db: &Db, photos_root: &Path, event: &notify::Event) -> Result<()> {
+    use notify::EventKind;
+    for path in &event.paths {
+        if !is_raw_file(path) {
+            continue;
+        }
+        match event.kind {
+            EventKind::Create(_) | EventKind::Modify(_) => {
+                if !path.is_file() {
+                    continue;
+                }
+                let metadata = std::fs::metadata(path)?;
+                let file_size = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
+                let file_mtime = i64::try_from(
+                    metadata
+                        .modified()
+                        .ok()
+                        .and_then(|modified_time| {
+                            modified_time.duration_since(std::time::UNIX_EPOCH).ok()
+                        })
+                        .map_or(0, |duration| duration.as_millis()),
+                )
+                .unwrap_or(0);
+                if let Some(parent_dir) = path.parent() {
+                    ensure_folder_chain(db, photos_root, parent_dir).await?;
+                }
+                let path_to_hash = path.clone();
+                let hash_hex =
+                    tokio::task::spawn_blocking(move || hashing::blake3_hex(&path_to_hash))
+                        .await??;
+                upsert_photo_and_file(db, &hash_hex, file_size, path, file_mtime).await?;
+            }
+            EventKind::Remove(_) => {
+                let conn = db.connect()?;
+                let path_str = path.to_string_lossy().to_string();
+                conn.execute(
+                    "UPDATE photo_files SET is_present = 0 WHERE path = ?1",
+                    [path_str],
+                )
+                .await?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
