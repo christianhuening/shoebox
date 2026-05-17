@@ -493,6 +493,63 @@ fn uuid_v4_hex() -> String {
     hex::encode(bytes)
 }
 
+/// Create a virtual copy of `photo_id` by cloning the next `variant_index`.
+/// Picks `MAX(variant_index) + 1`; returns the new variant's id.
+pub async fn create_virtual_copy(
+    conn: &libsql::Connection,
+    photo_id: &str,
+    user_id: &str,
+) -> Result<String> {
+    let mut rows = conn
+        .query(
+            "SELECT COALESCE(MAX(variant_index), -1) FROM variants WHERE photo_id = ?1",
+            [photo_id],
+        )
+        .await?;
+    let row = rows
+        .next()
+        .await?
+        .context("no rows returned for MAX(variant_index)")?;
+    let max_index: i64 = row.get(0)?;
+    let next_index = max_index + 1;
+
+    let mut parent_rows = conn
+        .query(
+            "SELECT develop_settings_json, develop_settings_version FROM variants
+             WHERE photo_id = ?1 ORDER BY variant_index LIMIT 1",
+            [photo_id],
+        )
+        .await?;
+    let (parent_json, parent_version): (String, i64) = if let Some(parent_row) =
+        parent_rows.next().await?
+    {
+        (parent_row.get(0)?, parent_row.get(1)?)
+    } else {
+        ("{}".to_string(), 1)
+    };
+
+    let new_id = uuid_v4_hex();
+    let now_ms = now_unix_ms();
+    conn.execute(
+        "INSERT INTO variants(id, photo_id, variant_index, created_by, created_at,
+            develop_settings_json, develop_settings_version,
+            develop_updated_at, develop_updated_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?4)",
+        (
+            new_id.as_str(),
+            photo_id,
+            next_index,
+            user_id,
+            now_ms,
+            parent_json.as_str(),
+            parent_version,
+        ),
+    )
+    .await
+    .context("creating virtual copy")?;
+    Ok(new_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,5 +883,20 @@ mod tests {
         remove_keyword(&conn, "p1", &id).await.unwrap();
         let detail = load_detail(&conn, "v1", "u1").await.unwrap();
         assert!(detail.keywords.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_virtual_copy_appends_next_index() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_variant(&conn, "v1", "p1", 0).await;
+
+        let new_id = create_virtual_copy(&conn, "p1", "u1").await.unwrap();
+        let cells = load_grid_for_folder(&conn, "f1", "u1").await.unwrap();
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[1].variant_id, new_id);
+        assert_eq!(cells[1].variant_index, 1);
+        assert_eq!(cells[1].display_name, "one.pef (2)");
     }
 }
