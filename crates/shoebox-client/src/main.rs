@@ -734,16 +734,62 @@ impl App {
                 iced::Task::none()
             }
 
-            // Library view messages — handled in Tasks 22-23 (Plan 1.4b).
-            Message::LibraryLockStatusTick
-            | Message::LibraryLockStatusLoaded(_)
-            | Message::LibraryAcquireLockClicked
-            | Message::LibraryRequestTakeoverClicked
-            | Message::LibraryReleaseLockClicked
-            | Message::LibraryLockActionPersisted(_)
-            | Message::LibraryLockHeartbeatTick
-            | Message::LibraryKeyboardNavigation(_)
-            | Message::LibraryClearError => iced::Task::none(),
+            Message::LibraryLockStatusTick => command_for_lock_status(&self.state),
+            Message::LibraryLockStatusLoaded(Ok(status)) => {
+                self.state.library_view.lock_status = status;
+                iced::Task::none()
+            }
+            Message::LibraryLockStatusLoaded(Err(e)) => {
+                self.state.library_view.error = Some(format!("Lock status load failed: {e}"));
+                iced::Task::none()
+            }
+            Message::LibraryAcquireLockClicked => {
+                http_lock_command(&self.state, LockAction::Acquire)
+            }
+            Message::LibraryReleaseLockClicked => {
+                http_lock_command(&self.state, LockAction::Release)
+            }
+            Message::LibraryRequestTakeoverClicked => {
+                http_lock_command(&self.state, LockAction::Takeover)
+            }
+            Message::LibraryLockActionPersisted(Ok(())) => command_for_lock_status(&self.state),
+            Message::LibraryLockActionPersisted(Err(e)) => {
+                self.state.library_view.error = Some(format!("Lock action failed: {e}"));
+                iced::Task::none()
+            }
+            Message::LibraryLockHeartbeatTick => {
+                if !matches!(
+                    self.state.library_view.lock_status,
+                    shoebox_client::library_state::LockStatus::HeldByYou
+                        | shoebox_client::library_state::LockStatus::HeldByYouTakeoverPending { .. }
+                ) {
+                    return iced::Task::none();
+                }
+                let Some(client) = self.state.client.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(detail) = self.state.library_view.detail.clone() else {
+                    return iced::Task::none();
+                };
+                let server_url = self.state.config.server_url.clone();
+                iced::Task::perform(
+                    async move {
+                        shoebox_client::library_state::http_heartbeat_lock(
+                            &client,
+                            &server_url,
+                            &detail.variant_id,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                    },
+                    Message::LibraryLockActionPersisted,
+                )
+            }
+
+            // Library view messages — handled in Task 23 (Plan 1.4b).
+            Message::LibraryKeyboardNavigation(_) | Message::LibraryClearError => {
+                iced::Task::none()
+            }
         }
     }
 
@@ -1068,7 +1114,79 @@ fn command_for_detail_and_grid(state: &AppState) -> iced::Task<Message> {
     iced::Task::batch(tasks)
 }
 
-/// Stub for Task 22 — real implementation lands when lock handlers are wired.
-fn command_for_lock_status(_state: &AppState) -> iced::Task<Message> {
-    iced::Task::none()
+fn command_for_lock_status(state: &AppState) -> iced::Task<Message> {
+    let Some(replica) = state.replica.clone() else {
+        return iced::Task::none();
+    };
+    let Some(user_id) = state.config.last_active_user_id.clone() else {
+        return iced::Task::none();
+    };
+    let Some(detail) = state.library_view.detail.clone() else {
+        return iced::Task::none();
+    };
+    iced::Task::perform(
+        async move {
+            let conn = replica.conn().map_err(|error| error.to_string())?;
+            shoebox_client::library_state::load_lock_status(&conn, &detail.variant_id, &user_id)
+                .await
+                .map_err(|error| error.to_string())
+        },
+        Message::LibraryLockStatusLoaded,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum LockAction {
+    Acquire,
+    Release,
+    Takeover,
+}
+
+fn http_lock_command(state: &AppState, action: LockAction) -> iced::Task<Message> {
+    let Some(client) = state.client.clone() else {
+        return iced::Task::none();
+    };
+    let Some(detail) = state.library_view.detail.clone() else {
+        return iced::Task::none();
+    };
+    let server_url = state.config.server_url.clone();
+    match action {
+        LockAction::Acquire => iced::Task::perform(
+            async move {
+                shoebox_client::library_state::http_acquire_lock(
+                    &client,
+                    &server_url,
+                    &detail.variant_id,
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            },
+            Message::LibraryLockActionPersisted,
+        ),
+        LockAction::Release => iced::Task::perform(
+            async move {
+                shoebox_client::library_state::http_release_lock(
+                    &client,
+                    &server_url,
+                    &detail.variant_id,
+                )
+                .await
+                .map_err(|error| error.to_string())
+            },
+            Message::LibraryLockActionPersisted,
+        ),
+        LockAction::Takeover => iced::Task::perform(
+            async move {
+                shoebox_client::library_state::http_request_takeover(
+                    &client,
+                    &server_url,
+                    &detail.variant_id,
+                )
+                .await
+                .map_err(|error| error.to_string())
+            },
+            Message::LibraryLockActionPersisted,
+        ),
+    }
 }
