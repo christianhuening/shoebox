@@ -102,7 +102,6 @@ as Plans 1.4 and 1.5 begin.
 
 Surfaced during Plan 1.3 implementation; tracked as memory notes for future attention:
 
-- **Indexer drops FS events on SQLite lock contention.** The watcher's `handle_event` warn-logs and never retries — a single locked write means a permanently missed file. Acceptable for v1 single-machine use. Needs bounded retry before multi-client NAS load. See memory: `project_indexer_event_drop_on_lock.md`.
 - **rawler 0.6 forces JPEG decode + re-encode.** No public access to raw embedded JPEG bytes; pinned to `image 0.24` while the workspace uses `image 0.25`. Net cost: one extra JPEG round-trip per indexed RAW. See memory: `project_rawler_api_constraints.md`.
 - **Two writers to `catalog.db`.** The migration runner (`Db`) and the spawned `sqld` subprocess both hold the same SQLite file. SQLite WAL handles this badly across processes; the v1 risk is accepted. Resolution: route all server-side writes through the loopback sqld connection. See memory: `project_libsql_server_unpublished.md`.
 

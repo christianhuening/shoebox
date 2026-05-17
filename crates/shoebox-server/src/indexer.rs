@@ -93,7 +93,7 @@ pub async fn initial_scan(
         let hash_hex =
             tokio::task::spawn_blocking(move || hashing::blake3_hex(&path_to_hash)).await??;
 
-        let outcome = upsert_photo_and_file(&db, &hash_hex, file_size, file_path, file_mtime)
+        let outcome = upsert_with_lock_retry(&db, &hash_hex, file_size, file_path, file_mtime)
             .await
             .with_context(|| format!("upserting {}", file_path.display()))?;
 
@@ -310,6 +310,51 @@ fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// Maximum number of upsert attempts when `SQLite` returns "database is locked".
+const UPSERT_MAX_ATTEMPTS: u32 = 5;
+/// Base backoff between attempts; doubled each retry (50, 100, 200, 400 ms).
+const UPSERT_BASE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Run `upsert_photo_and_file` with bounded retry on `SQLite` lock contention.
+///
+/// Returns the upsert outcome on success, or the last error encountered after
+/// `UPSERT_MAX_ATTEMPTS` attempts. Errors that aren't "database is locked"
+/// short-circuit immediately — only transient lock contention is retried.
+async fn upsert_with_lock_retry(
+    db: &Db,
+    hash_hex: &str,
+    file_size: i64,
+    path: &Path,
+    file_mtime: i64,
+) -> Result<UpsertOutcome> {
+    let mut current_backoff = UPSERT_BASE_BACKOFF;
+    for attempt in 1..=UPSERT_MAX_ATTEMPTS {
+        match upsert_photo_and_file(db, hash_hex, file_size, path, file_mtime).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(upsert_err) if is_database_locked(&upsert_err) && attempt < UPSERT_MAX_ATTEMPTS => {
+                tracing::debug!(
+                    event = "indexer.upsert.locked_retry",
+                    attempt,
+                    backoff_ms = u64::try_from(current_backoff.as_millis()).unwrap_or(u64::MAX),
+                    path = %path.display(),
+                    "transient SQLite lock; retrying"
+                );
+                tokio::time::sleep(current_backoff).await;
+                current_backoff = current_backoff.saturating_mul(2);
+            }
+            Err(upsert_err) => return Err(upsert_err),
+        }
+    }
+    unreachable!("loop returns on every iteration");
+}
+
+/// True if `err` (or any cause in its chain) indicates a `SQLite`
+/// "database is locked" failure.
+fn is_database_locked(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().contains("database is locked"))
+}
+
 /// Fire-and-forget: render 256 px + 2k JPEG previews for a newly-ingested
 /// photo on a blocking pool thread so the indexer loop doesn't stall on
 /// JPEG decode + encode work. Errors are warn-logged inside the closure;
@@ -436,7 +481,7 @@ async fn handle_event(
                     tokio::task::spawn_blocking(move || hashing::blake3_hex(&path_to_hash))
                         .await??;
                 let outcome =
-                    upsert_photo_and_file(db, &hash_hex, file_size, path, file_mtime).await?;
+                    upsert_with_lock_retry(db, &hash_hex, file_size, path, file_mtime).await?;
                 if matches!(outcome, UpsertOutcome::PhotoAndFileNew) {
                     spawn_thumbnail_build(cache_dir, path, &hash_hex);
                 }
@@ -461,6 +506,16 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use tempfile::TempDir;
+
+    #[test]
+    fn is_database_locked_detects_libsql_message() {
+        let synthetic =
+            anyhow::anyhow!("some context").context("SQLite failure: database is locked");
+        assert!(is_database_locked(&synthetic));
+
+        let unrelated = anyhow::anyhow!("disk full");
+        assert!(!is_database_locked(&unrelated));
+    }
 
     #[tokio::test]
     async fn initial_scan_picks_up_raw_files() {
