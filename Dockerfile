@@ -24,9 +24,25 @@ RUN cargo build --release -p shoebox-server
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates wget \
+        ca-certificates wget xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home /var/lib/shoebox shoebox
+
+# Install sqld so shoebox-server can spawn it as a subprocess (Plan 1.3).
+# Pin a specific release for reproducibility; verify against the published sha256.
+# URL + checksum confirmed against the libsql-server-v0.24.32 release on
+# 2026-05-17 (see Plan 1.3 Task 22).
+ARG SQLD_VERSION=v0.24.32
+ARG SQLD_SHA256=71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f
+RUN set -eux; \
+    cd /tmp; \
+    asset="libsql-server-x86_64-unknown-linux-gnu.tar.xz"; \
+    wget -q "https://github.com/tursodatabase/libsql/releases/download/libsql-server-${SQLD_VERSION}/${asset}"; \
+    echo "${SQLD_SHA256}  ${asset}" | sha256sum -c -; \
+    tar -xJf "${asset}"; \
+    mv "libsql-server-x86_64-unknown-linux-gnu/sqld" /usr/local/bin/sqld; \
+    chmod +x /usr/local/bin/sqld; \
+    rm -rf "${asset}" libsql-server-x86_64-unknown-linux-gnu
 
 COPY --from=builder /build/target/release/shoebox-server /usr/local/bin/shoebox-server
 
