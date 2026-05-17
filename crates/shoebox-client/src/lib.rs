@@ -3,6 +3,7 @@
 //!
 //! Plan 1.4 scaffolding — modules are added in subsequent tasks.
 
+pub mod cert_renewal;
 pub mod cert_store;
 pub mod config;
 pub mod discovery;
