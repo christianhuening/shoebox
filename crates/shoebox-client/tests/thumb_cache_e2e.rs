@@ -1,4 +1,4 @@
-//! Standalone e2e — exercises ThumbCache against a counted axum endpoint.
+//! Standalone e2e — exercises `ThumbCache` against a counted axum endpoint.
 //! Runs on every platform (no sqld dependency).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
