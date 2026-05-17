@@ -10,6 +10,7 @@ pub mod hashing;
 pub mod http;
 pub mod identity;
 pub mod indexer;
+pub mod locks_http;
 pub mod logging;
 pub mod mdns;
 pub mod mtls;
