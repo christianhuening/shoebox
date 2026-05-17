@@ -24,7 +24,7 @@ RUN cargo build --release -p shoebox-server
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
+        ca-certificates wget \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home /var/lib/shoebox shoebox
 
@@ -33,6 +33,9 @@ COPY --from=builder /build/target/release/shoebox-server /usr/local/bin/shoebox-
 USER shoebox
 WORKDIR /var/lib/shoebox
 EXPOSE 9000
+EXPOSE 9001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:9001/health || exit 1
 ENV SHOEBOX_BIND_ADDR=0.0.0.0:9000 \
     SHOEBOX_DATA_DIR=/var/lib/shoebox \
     SHOEBOX_PHOTOS_DIR=/photos \

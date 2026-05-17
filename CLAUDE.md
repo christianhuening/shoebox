@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Plan 1.1 (server foundation) implemented — workspace, schema migrations, /health, mDNS, Dockerfile, CI. Plans 1.2-1.5 pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plans 1.1+1.2 implemented — workspace, schema, /health, mDNS, mTLS + enrollment + revocation, Dockerfile, CI. Plans 1.3-1.5 pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -80,10 +80,10 @@ Implementation directories (`shoebox-server/`, `shoebox-client/`, `shoebox-commo
 
 ## Implementation status
 
-- `crates/shoebox-server` — workspace skeleton, libSQL catalog with 6 migrations, Axum HTTP server with `/health`, mDNS broadcaster, multi-stage Dockerfile. No auth, no indexer, no thumbnailer yet.
-- `crates/shoebox-common` — shared `Error`/`Result` and `SCHEMA_VERSION` constant.
-- Run locally: `cargo run -p shoebox-server` (defaults to `127.0.0.1:9000`).
-- Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v /tmp/shoebox-data:/var/lib/shoebox shoebox-server:dev`.
+- `crates/shoebox-server` — workspace skeleton, libSQL catalog with 6 migrations, internal Ed25519 CA + mTLS, /enroll + /renew + /whoami endpoints, CRL-aware client cert verification, clap CLI with `serve`/`revoke` subcommands, mDNS broadcaster, multi-stage Dockerfile. No indexer, thumbnailer, or libSQL wire proxy yet (Plan 1.3).
+- `crates/shoebox-common` — shared `Error`/`Result`, `UserId`/`MachineId` types, `SCHEMA_VERSION` constant.
+- Run locally: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health on `127.0.0.1:9001`).
+- Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev`.
 - CI: fmt + clippy + tests + docker build on push and PR.
 - **Toolchain:** `rust-toolchain.toml` pins `stable` (currently ~1.95). MSRV in workspace `Cargo.toml` is 1.85 — that's the floor for `libsql 0.6`'s transitive deps (edition2024).
 

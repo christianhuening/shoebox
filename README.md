@@ -20,7 +20,9 @@ docker build -t shoebox-server:dev .
 ```
 
 Run with a Docker named volume (recommended for local testing — no host
-permission issues):
+permission issues). Exposes the mTLS-protected catalog port (9000) and
+the unauthenticated loopback `/health` port (9001, only useful from
+container healthchecks):
 
 ```bash
 docker run --rm -p 9000:9000 \
@@ -28,10 +30,13 @@ docker run --rm -p 9000:9000 \
   shoebox-server:dev
 ```
 
+On first run, the server prints a generated enrollment secret to the log
+exactly once. Share it with users out-of-band; they'll need it to enroll
+their clients. To pre-set the secret, pass `-e SHOEBOX_SECRET=your-phrase`.
+
 Run with a host-mounted directory (matches a typical NAS deployment).
 The container runs as UID 10001 (`shoebox`), so the host directory must
-be owned by that UID or the server will fail to open `catalog.db` with
-`SQLITE_CANTOPEN`:
+be owned by that UID:
 
 ```bash
 mkdir -p /srv/shoebox-data

@@ -15,6 +15,7 @@ use tempfile::TempDir;
 use tokio::sync::oneshot;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn revoked_cert_cannot_reconnect() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -27,9 +28,11 @@ async fn revoked_cert_cannot_reconnect() {
             .unwrap(),
     );
     let conn = db.connect().unwrap();
-    let secret_plaintext = match shoebox_server::secret::ensure_present(&conn).await.unwrap() {
-        shoebox_server::secret::EnsureOutcome::Generated { plaintext } => plaintext,
-        _ => panic!("freshly created db should generate a secret"),
+    let shoebox_server::secret::EnsureOutcome::Generated {
+        plaintext: secret_plaintext,
+    } = shoebox_server::secret::ensure_present(&conn).await.unwrap()
+    else {
+        panic!("freshly created db should generate a secret")
     };
     drop(conn);
 

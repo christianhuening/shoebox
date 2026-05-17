@@ -15,6 +15,7 @@ use tempfile::TempDir;
 use tokio::sync::oneshot;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn enroll_then_use_cert_to_call_whoami() {
     // Install rustls provider once per test process.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -44,8 +45,8 @@ async fn enroll_then_use_cert_to_call_whoami() {
     let (server_cert, server_kp) = ca.issue_server_cert(&sans).unwrap();
 
     let crl = shoebox_server::mtls::CrlCache::new();
-    let tls_cfg = shoebox_server::mtls::mtls_server_config(&server_cert, &server_kp, &ca, crl)
-        .unwrap();
+    let tls_cfg =
+        shoebox_server::mtls::mtls_server_config(&server_cert, &server_kp, &ca, crl).unwrap();
 
     let state = shoebox_server::http::AppState {
         db: db.clone(),
@@ -123,10 +124,7 @@ async fn enroll_then_use_cert_to_call_whoami() {
     let client_key_der = parse_first_private_key(&client_kp.serialize_pem()).unwrap();
     let authed_client_cfg = ClientConfig::builder()
         .with_root_certificates(root_store)
-        .with_client_auth_cert(
-            vec![CertificateDer::from(client_cert_der)],
-            client_key_der,
-        )
+        .with_client_auth_cert(vec![CertificateDer::from(client_cert_der)], client_key_der)
         .unwrap();
     let authed_http = Client::builder()
         .use_preconfigured_tls(authed_client_cfg)
