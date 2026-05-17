@@ -2,6 +2,7 @@ mod config;
 mod db;
 mod http;
 mod logging;
+mod mdns;
 
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -38,6 +39,13 @@ async fn main() -> anyhow::Result<()> {
         schema_version: shoebox_common::SCHEMA_VERSION,
     };
 
+    let broadcaster = mdns::MdnsBroadcaster::start(
+        &cfg.server_name,
+        cfg.bind_addr.port(),
+        shoebox_common::SCHEMA_VERSION,
+        mdns::local_ips(),
+    )?;
+
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
@@ -45,5 +53,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = shutdown_tx.send(());
     });
 
-    http::serve(cfg.bind_addr, state, shutdown_rx).await
+    let result = http::serve(cfg.bind_addr, state, shutdown_rx).await;
+    broadcaster.shutdown();
+    result
 }
