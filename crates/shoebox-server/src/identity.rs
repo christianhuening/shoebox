@@ -54,7 +54,13 @@ impl PeerCertChain {
     pub fn from_der(der: Vec<u8>) -> Option<Self> {
         use x509_parser::prelude::*;
         let (_, parsed) = X509Certificate::from_der(&der).ok()?;
-        let serial_hex = hex::encode(parsed.raw_serial());
+        // Use `to_bytes_be()` — not `raw_serial()` — so the encoding matches
+        // the one used in `ca.rs` and `mtls.rs`.  `raw_serial()` returns the
+        // raw DER content octets, which include a leading 0x00 padding byte
+        // when the serial's high bit is set (i.e. ~50 % of the time with
+        // rcgen's 20-byte random serials).  `to_bytes_be()` strips that
+        // padding, giving the canonical big-endian integer representation.
+        let serial_hex = hex::encode(parsed.serial.to_bytes_be());
         let subject_cn = parsed
             .subject()
             .iter_common_name()
@@ -130,5 +136,108 @@ impl<S: Send + Sync> FromRequestParts<S> for MaybeClientIdentity {
         Ok(MaybeClientIdentity(
             ClientIdentity::from_request_parts(parts, state).await.ok(),
         ))
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
+        KeyUsagePurpose, SerialNumber,
+    };
+    use x509_parser::prelude::*;
+
+    /// Issue a cert from a throw-away CA with the given serial bytes.
+    ///
+    /// The serial is set explicitly so tests can force particular bit patterns
+    /// without relying on rcgen's random generation.
+    fn issue_test_cert_der_with_serial(serial_bytes: &[u8]) -> Vec<u8> {
+        // Build a self-signed one-off CA.
+        let ca_kp = KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+        ca_params.distinguished_name = {
+            let mut dn = DistinguishedName::new();
+            dn.push(DnType::CommonName, "test-ca");
+            dn
+        };
+        let ca_cert = ca_params.self_signed(&ca_kp).unwrap();
+
+        // Build a leaf cert with the supplied serial.
+        let leaf_kp = KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
+        let mut leaf_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        leaf_params.serial_number = Some(SerialNumber::from_slice(serial_bytes));
+        leaf_params.distinguished_name = {
+            let mut dn = DistinguishedName::new();
+            dn.push(DnType::CommonName, "test-user");
+            dn.push(DnType::OrganizationalUnitName, "test-machine");
+            dn
+        };
+        let leaf_cert = leaf_params.signed_by(&leaf_kp, &ca_cert, &ca_kp).unwrap();
+        leaf_cert.der().to_vec()
+    }
+
+    /// Regression test: `PeerCertChain::from_der` must produce the same serial
+    /// hex as `x509_parser`'s `serial.to_bytes_be()` — the encoding used by
+    /// `ca.rs` and `mtls.rs`.
+    ///
+    /// We test two serials deterministically:
+    ///
+    /// * A low-bit serial (high bit clear): `raw_serial()` and `to_bytes_be()`
+    ///   agree — both produce the same bytes.
+    /// * A high-bit serial (high bit set): `raw_serial()` adds a leading `0x00`
+    ///   DER padding byte, making its hex string two chars longer.  `to_bytes_be()`
+    ///   strips the padding and gives the canonical integer.  This is the bug that
+    ///   existed when `identity.rs` used `raw_serial()`.
+    #[test]
+    fn leaf_serial_hex_matches_to_bytes_be() {
+        // Low-bit serial: 0x7F — high bit clear, no DER padding needed.
+        let low_bit_serial = &[0x7F, 0xAB, 0xCD];
+        // High-bit serial: 0x80... — high bit set, DER requires a 0x00 prefix.
+        let high_bit_serial = &[0x80, 0xAB, 0xCD];
+
+        for serial_bytes in [low_bit_serial.as_ref(), high_bit_serial.as_ref()] {
+            let der = issue_test_cert_der_with_serial(serial_bytes);
+
+            // The encoding produced by `PeerCertChain::from_der`.
+            let chain =
+                PeerCertChain::from_der(der.clone()).expect("from_der must parse the test cert");
+
+            // The canonical encoding used by ca.rs / mtls.rs.
+            let (_, parsed) = X509Certificate::from_der(&der).unwrap();
+            let canonical_hex = hex::encode(parsed.serial.to_bytes_be());
+
+            // `from_der` must always match `to_bytes_be()`.
+            assert_eq!(
+                chain.leaf_serial_hex, canonical_hex,
+                "leaf_serial_hex diverges from to_bytes_be() — serial encoding regression \
+                 (serial_bytes={serial_bytes:02x?})"
+            );
+        }
+
+        // Document the trap: for the high-bit serial, `raw_serial()` differs from
+        // `to_bytes_be()` by a leading 0x00 padding byte.  This confirms that
+        // `to_bytes_be()` is the correct choice and `raw_serial()` must not be used.
+        let high_bit_der = issue_test_cert_der_with_serial(high_bit_serial);
+        let (_, parsed) = X509Certificate::from_der(&high_bit_der).unwrap();
+        let raw_hex = hex::encode(parsed.raw_serial());
+        let canonical_hex = hex::encode(parsed.serial.to_bytes_be());
+        assert_ne!(
+            raw_hex, canonical_hex,
+            "raw_serial() and to_bytes_be() should differ for a high-bit serial"
+        );
+        assert!(
+            raw_hex.starts_with("00"),
+            "raw_serial() must start with 0x00 padding for a high-bit serial"
+        );
+        assert_eq!(
+            raw_hex.len(),
+            canonical_hex.len() + 2,
+            "raw_serial() should be exactly one byte (two hex chars) longer"
+        );
     }
 }

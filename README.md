@@ -10,7 +10,7 @@ RAW digital photos. Multi-user shared catalog hosted on a NAS.
 
 ```bash
 cargo run -p shoebox-server
-curl -s http://127.0.0.1:9000/health
+curl -s http://127.0.0.1:9001/health
 ```
 
 ## Building the Docker image
