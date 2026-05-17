@@ -32,6 +32,43 @@ impl Db {
             .connect()
             .map_err(|e| anyhow!("failed to connect to libSQL: {e}"))
     }
+
+    /// Insert a row into revoked_certs. `serial_hex` is the lowercase-hex
+    /// serial number of the leaf cert being revoked.
+    pub async fn insert_revoked_cert(
+        &self,
+        serial_hex: &str,
+        reason: Option<&str>,
+        revoked_by: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.connect()?;
+        let now_ms = now_ms();
+        conn.execute(
+            "INSERT INTO revoked_certs (serial_number, revoked_at, reason, revoked_by) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(serial_number) DO NOTHING",
+            (
+                serial_hex.to_string(),
+                now_ms,
+                reason.map(str::to_string),
+                revoked_by.map(str::to_string),
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Return true if the given hex serial appears in `revoked_certs`.
+    pub async fn is_serial_revoked(&self, serial_hex: &str) -> anyhow::Result<bool> {
+        let conn = self.connect()?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM revoked_certs WHERE serial_number = ?1",
+                [serial_hex],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
 }
 
 async fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -284,5 +321,16 @@ mod tests {
                 "table {table} should exist after migration 0001"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn revoked_serial_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
+        assert!(!db.is_serial_revoked("abc123").await.unwrap());
+        db.insert_revoked_cert("abc123", Some("test"), None).await.unwrap();
+        assert!(db.is_serial_revoked("abc123").await.unwrap());
+        // Idempotent: inserting again does not error.
+        db.insert_revoked_cert("abc123", Some("test"), None).await.unwrap();
     }
 }
