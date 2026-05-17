@@ -42,6 +42,17 @@ directories = { workspace = true }
 futures-util = { workspace = true }
 parking_lot = { workspace = true }
 
+# Deps for the libsql embedded-replica connector (Plan 1.4 Task 8).
+# libsql 0.6 takes a `tower::Service<http::Uri>` whose response satisfies
+# `hyper::client::connect::Connection` from hyper 0.14 — so we pull hyper 0.14
+# and the matching hyper-rustls 0.25 (which pins rustls 0.22). That rustls
+# instance coexists with the workspace's rustls 0.23 used by reqwest/axum;
+# they never share types (PEM bytes are the only thing crossing the boundary).
+hyper-014 = { package = "hyper", version = "0.14", default-features = false, features = ["client", "http1", "http2", "tcp"] }
+hyper-rustls-025 = { package = "hyper-rustls", version = "0.25", default-features = false, features = ["http1", "http2", "tls12", "ring"] }
+rustls-022 = { package = "rustls", version = "0.22", default-features = false, features = ["ring", "tls12"] }
+tower = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
 which = "6"

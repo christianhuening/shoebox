@@ -7,3 +7,4 @@ pub mod cert_store;
 pub mod config;
 pub mod enrollment;
 pub mod mtls_http;
+pub mod replica;
