@@ -5,13 +5,15 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::Element;
 
-use crate::app_state::AppState;
 use crate::discovery::DiscoveredServer;
 use crate::screens::Message;
 
+/// `last_error` is the only piece of `AppState` this screen reads; the
+/// caller passes it as a short-lived borrow so we don't need to hold a
+/// read guard across the Element's lifetime.
 #[must_use]
 pub fn view<'a>(
-    state: &'a AppState,
+    last_error: Option<&'a str>,
     chosen_server: &'a DiscoveredServer,
     secret_draft: &'a str,
     display_name_draft: &'a str,
@@ -48,7 +50,7 @@ pub fn view<'a>(
     ]
     .spacing(8);
 
-    let error_row: Element<Message> = match state.last_error.as_deref() {
+    let error_row: Element<Message> = match last_error {
         Some(message) => row![text("Error: "), text(message)].into(),
         None => row![].into(),
     };

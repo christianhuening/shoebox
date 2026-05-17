@@ -27,6 +27,12 @@ pub struct Replica {
     database: Arc<Database>,
 }
 
+impl std::fmt::Debug for Replica {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Replica").finish_non_exhaustive()
+    }
+}
+
 impl Replica {
     /// Open (or create) a local replica file at `local_path`, syncing
     /// against `<server_url>/v1` over the mTLS proxy.

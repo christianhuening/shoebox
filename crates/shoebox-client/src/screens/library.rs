@@ -3,7 +3,7 @@
 use iced::widget::{column, container, row, text};
 use iced::Element;
 
-use crate::app_state::{AppState, ConnectionStatus};
+use crate::app_state::ConnectionStatus;
 use crate::screens::Message;
 
 /// View state owned by `main.rs`: the latest stats loaded from the
@@ -19,22 +19,27 @@ pub struct LibraryStats {
     pub frame_no: u64,
 }
 
+/// The subset of `AppState` this screen actually reads, passed by the
+/// caller so the screen module doesn't need to hold a read guard across
+/// the Element's lifetime.
 #[must_use]
 #[allow(clippy::similar_names)]
-pub fn view<'a>(state: &'a AppState, stats: &'a LibraryStats) -> Element<'a, Message> {
-    let connection_line = text(format!(
-        "Connection: {:?} ({})",
-        state.connection_status, state.config.server_url
-    ))
-    .size(16);
+pub fn view<'a>(
+    connection_status: ConnectionStatus,
+    server_url: &'a str,
+    file_storage_warning: bool,
+    stats: &'a LibraryStats,
+) -> Element<'a, Message> {
+    let connection_line =
+        text(format!("Connection: {connection_status:?} ({server_url})")).size(16);
 
-    let offline_banner: Element<Message> = if state.connection_status == ConnectionStatus::Offline {
+    let offline_banner: Element<Message> = if connection_status == ConnectionStatus::Offline {
         text("⚠ Offline — reading from local replica; writes disabled").into()
     } else {
         row![].into()
     };
 
-    let file_storage_banner: Element<Message> = if state.file_storage_warning.0 {
+    let file_storage_banner: Element<Message> = if file_storage_warning {
         text(
             "⚠ Cert is stored in a file (you chose this when the keychain failed). \
              Re-enroll on a working keychain to upgrade.",

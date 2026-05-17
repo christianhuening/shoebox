@@ -7,8 +7,11 @@ pub mod enter_secret;
 pub mod library;
 pub mod profile_picker;
 
+use std::sync::Arc;
+
 use crate::discovery::DiscoveredServer;
 use crate::enrollment::EnrollResult;
+use crate::replica::Replica;
 
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::large_enum_variant)]
@@ -87,9 +90,31 @@ pub enum Message {
     // Library + background tickers
     ReplicaSyncTick,
     ReplicaSyncFinished(Result<u64, String>),
+    /// Fresh `LibraryStats` produced by `library::load_stats` after a
+    /// successful sync (or after the user finishes the profile picker).
+    LibraryStatsLoaded(Result<library::LibraryStats, String>),
+    /// Result of the steady-state "open replica + load stats" task that
+    /// runs once at startup when we're past first-run.
+    ReplicaOpenedAndStatsLoaded(Result<OpenedReplicaBundle, String>),
+    /// Result of post-enrollment "open replica + load users" task — hands
+    /// the new `Arc<Replica>` plus user list back to `main.rs::update()`.
+    EnrollmentFinalized {
+        replica: Arc<Replica>,
+        users: Vec<UserRow>,
+    },
     CertRenewalTick,
 
     // Generic
     ClearError,
     Shutdown,
+}
+
+/// Snapshot returned by the steady-state replica-open task. Carries
+/// everything `update` needs to populate `AppState` in one shot.
+#[derive(Debug, Clone)]
+pub struct OpenedReplicaBundle {
+    pub ca_pem: String,
+    pub client: reqwest::Client,
+    pub replica: Arc<Replica>,
+    pub stats: library::LibraryStats,
 }

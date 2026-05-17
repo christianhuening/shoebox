@@ -4,11 +4,13 @@
 use iced::widget::{button, column, container, row, text};
 use iced::Element;
 
-use crate::app_state::AppState;
 use crate::screens::{Message, Screen};
 
+/// `EnrollProgress` doesn't currently read anything from `AppState`; we
+/// drop the parameter to free the caller from holding a read guard
+/// across the Element's lifetime.
 #[must_use]
-pub fn view<'a>(_state: &'a AppState, current_screen: &'a Screen) -> Element<'a, Message> {
+pub fn view(current_screen: &Screen) -> Element<'_, Message> {
     match current_screen {
         Screen::EnrollProgress { chosen_server, .. } => container(
             column![

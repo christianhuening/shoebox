@@ -3,16 +3,20 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::app_state::AppState;
 use crate::discovery::DiscoveredServer;
 use crate::screens::Message;
 
 /// View state lives in `AppState` (the discovered-servers list is
 /// accumulated by `update()` from `Message::ServerDiscovered`). This
 /// module is pure `view`.
+///
+/// `last_error` is the only field this screen needs from `AppState`;
+/// the caller passes it as a short-lived borrow so the screen module
+/// doesn't have to take a borrow of the whole `AppState` (which would
+/// force the caller to hold a read guard across the Element's lifetime).
 #[must_use]
 pub fn view<'a>(
-    state: &'a AppState,
+    last_error: Option<&'a str>,
     discovered_servers: &'a [DiscoveredServer],
     manual_url_draft: &'a str,
     manual_name_draft: &'a str,
@@ -58,7 +62,7 @@ pub fn view<'a>(
 
     let retry_button = button(text("Retry discovery")).on_press(Message::DiscoveryRetry);
 
-    let error_row: Element<Message> = match state.last_error.as_deref() {
+    let error_row: Element<Message> = match last_error {
         Some(message) => row![text("Error: "), text(message)].into(),
         None => row![].into(),
     };

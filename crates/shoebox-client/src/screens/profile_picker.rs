@@ -4,12 +4,13 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::Element;
 
-use crate::app_state::AppState;
 use crate::screens::{Message, UserRow};
 
+/// `last_error` is the only field this screen reads from `AppState`;
+/// the caller passes it as a short-lived borrow.
 #[must_use]
 pub fn view<'a>(
-    state: &'a AppState,
+    last_error: Option<&'a str>,
     existing_users: &'a [UserRow],
     new_user_draft: &'a str,
 ) -> Element<'a, Message> {
@@ -40,7 +41,7 @@ pub fn view<'a>(
     ]
     .spacing(6);
 
-    let error_row: Element<Message> = match state.last_error.as_deref() {
+    let error_row: Element<Message> = match last_error {
         Some(message) => row![text("Error: "), text(message)].into(),
         None => row![].into(),
     };
