@@ -49,6 +49,8 @@ async fn renewed_cert_can_call_whoami_with_same_user_id() {
         db: db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
+        sqld_url: "http://127.0.0.1:0".to_string(),
+        cache_dir: tmp.path().to_path_buf(),
     };
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

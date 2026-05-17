@@ -13,6 +13,12 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub schema_version: i64,
     pub ca: Arc<crate::ca::Ca>,
+    /// Loopback URL of the embedded `sqld` subprocess, e.g. `http://127.0.0.1:53421`.
+    /// The libSQL wire proxy forwards `/v1/*` and `/v2/*` to this base.
+    pub sqld_url: String,
+    /// Directory holding generated thumbnails. Populated for forward
+    /// compatibility with the thumbnail HTTP endpoints (Plan 1.3 Task 13).
+    pub cache_dir: std::path::PathBuf,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,6 +36,7 @@ pub fn public_router(state: AppState) -> Router {
         .merge(crate::enroll::route())
         .merge(crate::enroll::renew_route())
         .merge(crate::whoami::route())
+        .merge(crate::proxy::routes())
         .with_state(state)
 }
 
@@ -68,6 +75,8 @@ mod tests {
             db,
             schema_version: shoebox_common::SCHEMA_VERSION,
             ca,
+            sqld_url: "http://127.0.0.1:0".to_string(),
+            cache_dir: tmp.path().to_path_buf(),
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

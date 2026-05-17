@@ -8,11 +8,11 @@
 //! For Plan 1.3 v1 we keep `<data_dir>/catalog.db` as the single source of
 //! truth. The migration runner (`Db`) opens the file on startup, runs
 //! migrations, then keeps its handle alive for server-side bookkeeping writes
-//! (revoked_certs, sessions, etc.). At the same time, `sqld` opens that same
+//! (`revoked_certs`, sessions, etc.). At the same time, `sqld` opens that same
 //! file and serves it over the libSQL wire protocol.
 //!
-//! **This means two processes can write to the same SQLite file concurrently.**
-//! SQLite's WAL mode handles concurrent *readers* fine but is not safe for
+//! **This means two processes can write to the same `SQLite` file concurrently.**
+//! `SQLite`'s WAL mode handles concurrent *readers* fine but is not safe for
 //! concurrent *writers* from separate processes unless carefully coordinated.
 //! In practice the server-side writes are infrequent and the risk of a write
 //! collision is low, but this is a known architectural debt accepted for v1.
@@ -93,7 +93,7 @@ async fn wait_until_ready(local_url: &str) -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    bail!("sqld did not become reachable within 10s on {}", local_url)
+    bail!("sqld did not become reachable within 10s on {local_url}")
 }
 
 /// Spawn a `sqld` child process serving `<data_dir>/sqld/` on an ephemeral loopback port.

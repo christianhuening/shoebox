@@ -1,4 +1,6 @@
-use shoebox_server::{ca, cli, config, db, http, logging, mdns, mtls, revoke, secret, tls_server};
+use shoebox_server::{
+    ca, cli, config, db, http, logging, mdns, mtls, revoke, secret, sqld_embed, tls_server,
+};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -86,10 +88,20 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
         }
     }
 
+    // Spawn the embedded sqld subprocess (loopback only). The proxy
+    // forwards mTLS-authenticated `/v1/*` and `/v2/*` traffic to this URL.
+    // `embedded_sqld` is bound to a local variable so it lives for the
+    // duration of `serve_main`; `Drop` (via `kill_on_drop(true)`) ensures
+    // the child is terminated on shutdown even if `shutdown().await` is
+    // not reached due to an early error return.
+    let embedded_sqld = sqld_embed::start(cfg.data_dir.clone()).await?;
+
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
+        sqld_url: embedded_sqld.local_url.clone(),
+        cache_dir: cfg.cache_dir.clone(),
     };
 
     let broadcaster = mdns::MdnsBroadcaster::start(
@@ -120,6 +132,7 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     let result = tls_server::serve_public_tls(cfg.bind_addr, state, tls_cfg, shutdown_rx).await;
     let _ = shutdown_health_tx.send(());
     broadcaster.shutdown();
+    embedded_sqld.shutdown().await;
     result
 }
 

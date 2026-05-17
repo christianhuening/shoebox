@@ -19,6 +19,8 @@ async fn full_server_serves_health() {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
+        sqld_url: "http://127.0.0.1:0".to_string(),
+        cache_dir: tmp.path().to_path_buf(),
     };
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
