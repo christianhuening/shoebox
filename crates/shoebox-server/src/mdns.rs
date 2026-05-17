@@ -20,7 +20,7 @@ impl MdnsBroadcaster {
         server_name: &str,
         port: u16,
         schema_version: i64,
-        ips: Vec<IpAddr>,
+        ips: &[IpAddr],
     ) -> Result<Self> {
         let daemon = ServiceDaemon::new().context("creating mdns daemon")?;
         let host_label = sanitize(server_name);
@@ -35,7 +35,7 @@ impl MdnsBroadcaster {
             SERVICE_TYPE,
             &host_label,
             &format!("{host_label}.local."),
-            ips.as_slice(),
+            ips,
             port,
             Some(txt),
         )
@@ -62,11 +62,18 @@ impl MdnsBroadcaster {
 
 fn sanitize(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
 /// Enumerate non-loopback IPs from local network interfaces.
+#[must_use]
 pub fn local_ips() -> Vec<IpAddr> {
     // Use `if_addrs` for cross-platform interface enumeration.
     // For now keep it minimal: read from std until we add the dep.

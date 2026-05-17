@@ -8,15 +8,16 @@ async fn main() -> anyhow::Result<()> {
     logging::init();
 
     let cfg_path = std::env::var("SHOEBOX_CONFIG").ok();
-    let cfg = match cfg_path {
-        Some(p) => {
-            tracing::info!(event = "config.load", path = %p, "loading config file");
-            config::Config::load_from_path(std::path::Path::new(&p))?
-        }
-        None => {
-            tracing::info!(event = "config.load", source = "env", "no SHOEBOX_CONFIG; building from env");
-            config::Config::from_env_with_defaults()
-        }
+    let cfg = if let Some(p) = cfg_path {
+        tracing::info!(event = "config.load", path = %p, "loading config file");
+        config::Config::load_from_path(std::path::Path::new(&p))?
+    } else {
+        tracing::info!(
+            event = "config.load",
+            source = "env",
+            "no SHOEBOX_CONFIG; building from env"
+        );
+        config::Config::from_env_with_defaults()
     };
 
     tracing::info!(
@@ -39,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         &cfg.server_name,
         cfg.bind_addr.port(),
         shoebox_common::SCHEMA_VERSION,
-        mdns::local_ips(),
+        &mdns::local_ips(),
     )?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();

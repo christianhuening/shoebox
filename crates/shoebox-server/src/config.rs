@@ -18,6 +18,7 @@ impl Config {
         toml::from_str(toml_str).map_err(|e| anyhow::anyhow!("invalid config TOML: {e}"))
     }
 
+    #[must_use]
     pub fn apply_env_overrides(mut self) -> Self {
         if let Ok(v) = std::env::var("SHOEBOX_BIND_ADDR") {
             if let Ok(addr) = v.parse() {
@@ -43,21 +44,21 @@ impl Config {
 impl Config {
     pub fn load_from_path(path: &std::path::Path) -> anyhow::Result<Self> {
         let s = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("reading config {path:?}: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("reading config {}: {e}", path.display()))?;
         Ok(Self::from_toml_str(&s)?.apply_env_overrides())
     }
 
     /// Build a Config from environment variables alone, with sensible
     /// defaults for any not set. Used when no `server.toml` is present.
+    #[must_use]
     pub fn from_env_with_defaults() -> Self {
         Self {
-            server_name: std::env::var("SHOEBOX_SERVER_NAME")
-                .unwrap_or_else(|_| {
-                    hostname::get()
-                        .ok()
-                        .and_then(|h| h.into_string().ok())
-                        .unwrap_or_else(|| "shoebox".to_string())
-                }),
+            server_name: std::env::var("SHOEBOX_SERVER_NAME").unwrap_or_else(|_| {
+                hostname::get()
+                    .ok()
+                    .and_then(|h| h.into_string().ok())
+                    .unwrap_or_else(|| "shoebox".to_string())
+            }),
             bind_addr: std::env::var("SHOEBOX_BIND_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:9000".into())
                 .parse()

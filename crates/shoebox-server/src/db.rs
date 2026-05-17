@@ -18,7 +18,7 @@ impl Db {
         let database = Builder::new_local(path)
             .build()
             .await
-            .map_err(|e| anyhow!("failed to open libSQL database at {path:?}: {e}"))?;
+            .map_err(|e| anyhow!("failed to open libSQL database at {}: {e}", path.display()))?;
 
         let conn = database
             .connect()
@@ -51,11 +51,10 @@ async fn apply_migrations(conn: &Connection) -> Result<()> {
             f.path()
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e == "sql")
-                .unwrap_or(false)
+                .is_some_and(|e| e == "sql")
         })
         .collect();
-    entries.sort_by_key(|f| f.path().file_name().map(|n| n.to_os_string()));
+    entries.sort_by_key(|f| f.path().file_name().map(std::ffi::OsStr::to_os_string));
 
     for file in entries {
         let name = file
@@ -83,10 +82,15 @@ async fn apply_migrations(conn: &Connection) -> Result<()> {
         let sql = file
             .contents_utf8()
             .ok_or_else(|| anyhow!("migration {name} not UTF-8"))?;
-        tracing::info!(event = "migration.apply", version, name, "applying migration");
-        conn.execute_batch(sql).await.with_context(|| {
-            format!("applying migration {name} (version {version})")
-        })?;
+        tracing::info!(
+            event = "migration.apply",
+            version,
+            name,
+            "applying migration"
+        );
+        conn.execute_batch(sql)
+            .await
+            .with_context(|| format!("applying migration {name} (version {version})"))?;
         let now_ms = chrono_now_ms();
         conn.execute(
             "INSERT INTO _schema_migrations (version, applied_at) VALUES (?1, ?2)",
@@ -102,8 +106,7 @@ fn chrono_now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 #[cfg(test)]
@@ -120,7 +123,10 @@ mod tests {
 
         // _schema_migrations exists and contains version 1.
         let mut rows = conn
-            .query("SELECT version FROM _schema_migrations ORDER BY version", ())
+            .query(
+                "SELECT version FROM _schema_migrations ORDER BY version",
+                (),
+            )
             .await
             .unwrap();
         let row = rows.next().await.unwrap().expect("at least one migration");

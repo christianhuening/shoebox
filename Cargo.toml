@@ -11,6 +11,17 @@ rust-version = "1.78"
 license = "Apache-2.0"
 repository = "https://github.com/CHANGE-ME/shoebox"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pedantic exceptions that fight ergonomic Rust in this codebase:
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
 [workspace.dependencies]
 anyhow = "1.0"
 thiserror = "1.0"
@@ -28,3 +39,4 @@ libsql = { version = "0.6", default-features = false, features = ["core"] }
 mdns-sd = "0.11"
 include_dir = "0.7"
 hostname = "0.3"
+
