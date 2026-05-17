@@ -42,6 +42,16 @@ pub struct ThumbCache {
     disk_dir: PathBuf,
 }
 
+impl std::fmt::Debug for ThumbCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ThumbCache")
+            .field("server_base_url", &self.server_base_url)
+            .field("disk_dir", &self.disk_dir)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ThumbCache {
     /// Construct a cache. `disk_dir` is created if missing.
     #[allow(clippy::needless_pass_by_value)]

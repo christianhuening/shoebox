@@ -9,6 +9,7 @@ pub mod cert_store;
 pub mod config;
 pub mod discovery;
 pub mod enrollment;
+pub mod library_state;
 pub mod mtls_http;
 pub mod replica;
 pub mod screens;
