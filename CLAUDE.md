@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Spec drafted 2026-05-17, awaiting user review and implementation plan | [`docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md`](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plan 1.1 (server foundation) implemented — workspace, schema migrations, /health, mDNS, Dockerfile, CI. Plans 1.2-1.5 pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -77,6 +77,15 @@ Implementation directories (`shoebox-server/`, `shoebox-client/`, `shoebox-commo
 - **Backlog items live in the relevant spec's "Backlog" section,** not in a
   separate file. When a backlog item is picked up, it gets its own spec.
 - **No code exists yet.** Implementation of sub-project #1 has not started.
+
+## Implementation status
+
+- `crates/shoebox-server` — workspace skeleton, libSQL catalog with 6 migrations, Axum HTTP server with `/health`, mDNS broadcaster, multi-stage Dockerfile. No auth, no indexer, no thumbnailer yet.
+- `crates/shoebox-common` — shared `Error`/`Result` and `SCHEMA_VERSION` constant.
+- Run locally: `cargo run -p shoebox-server` (defaults to `127.0.0.1:9000`).
+- Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v /tmp/shoebox-data:/var/lib/shoebox shoebox-server:dev`.
+- CI: fmt + clippy + tests + docker build on push and PR.
+- **Toolchain:** `rust-toolchain.toml` pins `stable` (currently ~1.95). MSRV in workspace `Cargo.toml` is 1.85 — that's the floor for `libsql 0.6`'s transitive deps (edition2024).
 
 ## Memory pointers
 
