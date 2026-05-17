@@ -41,6 +41,7 @@ keyring = { workspace = true }
 directories = { workspace = true }
 futures-util = { workspace = true }
 parking_lot = { workspace = true }
+rand = { workspace = true }
 
 # Deps for the libsql embedded-replica connector (Plan 1.4 Task 8).
 # libsql 0.6 takes a `tower::Service<http::Uri>` whose response satisfies

@@ -5131,6 +5131,7 @@ dependencies = [
  "libsql",
  "mdns-sd",
  "parking_lot 0.12.5",
+ "rand 0.8.6",
  "rcgen",
  "reqwest",
  "rustls 0.22.4",
