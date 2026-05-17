@@ -39,6 +39,8 @@ time = { workspace = true }
 iced = { workspace = true }
 keyring = { workspace = true }
 directories = { workspace = true }
+lru = { workspace = true }
+image = { workspace = true }
 futures-util = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
