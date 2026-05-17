@@ -4,6 +4,7 @@
 pub mod ca;
 pub mod config;
 pub mod db;
+pub mod enroll;
 pub mod http;
 pub mod logging;
 pub mod mdns;

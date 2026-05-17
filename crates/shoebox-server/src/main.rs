@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
+        ca: Arc::new(ca),
     };
 
     let broadcaster = mdns::MdnsBroadcaster::start(

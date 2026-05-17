@@ -12,6 +12,7 @@ use crate::db::Db;
 pub struct AppState {
     pub db: Arc<Db>,
     pub schema_version: i64,
+    pub ca: Arc<crate::ca::Ca>,
 }
 
 #[derive(Debug, Serialize)]
@@ -23,7 +24,9 @@ pub struct HealthResponse {
 /// Endpoints that require mTLS (gated by the TLS layer, not the router).
 /// In Task 8 this gains /enroll; in Task 11 it gains /whoami.
 pub fn public_router(state: AppState) -> Router {
-    Router::new().with_state(state)
+    Router::new()
+        .merge(crate::enroll::route())
+        .with_state(state)
 }
 
 /// Plain-HTTP /health endpoint for container/k8s healthchecks. Bound to
@@ -56,9 +59,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("catalog.db");
         let db = Arc::new(Db::open(&db_path).await.unwrap());
+        let ca = Arc::new(crate::ca::Ca::open(tmp.path()).unwrap());
         let state = AppState {
             db,
             schema_version: shoebox_common::SCHEMA_VERSION,
+            ca,
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

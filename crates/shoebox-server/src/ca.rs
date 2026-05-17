@@ -11,7 +11,7 @@
 use anyhow::{anyhow, Context, Result};
 use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SubjectPublicKeyInfo,
+    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, PublicKeyData,
 };
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -172,14 +172,11 @@ impl Ca {
     /// Sign a client leaf cert over an external public key (from enrollment CSR).
     /// `user_id` becomes the subject CN; `machine_id` becomes the OU.
     ///
-    /// # API deviation from plan
-    /// The plan used `params.signed_by_pubkey(public_key, &issuer)` which does
-    /// not exist in rcgen 0.13.  Instead we use `CertificateParams::signed_by`
-    /// with a `SubjectPublicKeyInfo` value, which implements `PublicKeyData` and
-    /// is accepted by the same method.
-    pub fn issue_client_cert(
+    /// Accepts any type implementing `PublicKeyData` (e.g. the `PublicKey`
+    /// extracted from a parsed CSR, or a `SubjectPublicKeyInfo`).
+    pub fn issue_client_cert<K: PublicKeyData>(
         &self,
-        public_key: &SubjectPublicKeyInfo,
+        public_key: &K,
         user_id: &UserId,
         machine_id: &MachineId,
     ) -> Result<IssuedCert> {
