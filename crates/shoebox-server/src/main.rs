@@ -1,6 +1,6 @@
 use shoebox_server::{
-    backup, ca, cli, config, db, http, indexer, janitor, logging, mdns, metrics, mtls, revoke,
-    secret, sqld_embed, tls_server,
+    backup, ca, cert_renewal, cli, config, db, http, indexer, janitor, logging, mdns, metrics,
+    mtls, revoke, secret, sqld_embed, tls_server,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -31,6 +31,7 @@ fn load_config() -> anyhow::Result<config::Config> {
     })
 }
 
+#[allow(clippy::too_many_lines)]
 async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     mtls::install_crypto_provider();
 
@@ -50,6 +51,18 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     let ca = Arc::new(ca::Ca::open(&cfg.data_dir)?);
     let sans = ca::build_server_sans(&cfg.server_name, &cfg.extra_sans);
     let (server_cert, server_kp) = ca.issue_server_cert(&sans)?;
+
+    // Capture the server cert's expiry so the renewal task can compute
+    // `days_remaining` (and update the Prometheus gauge) on its first tick
+    // without re-issuing.
+    let initial_not_after = server_cert.not_after.unix_timestamp();
+    let (cert_shutdown_tx, cert_shutdown_rx) = oneshot::channel();
+    let cert_task = tokio::spawn(cert_renewal::run(
+        ca.clone(),
+        cfg.clone(),
+        initial_not_after,
+        cert_shutdown_rx,
+    ));
 
     // Build the CRL cache, populate it once synchronously, then spawn a
     // background task to refresh it every 30 seconds.
@@ -152,6 +165,8 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     let _ = janitor_task.await;
     let _ = backup_shutdown_tx.send(());
     let _ = backup_task.await;
+    let _ = cert_shutdown_tx.send(());
+    let _ = cert_task.await;
     broadcaster.shutdown();
     embedded_sqld.shutdown().await;
     result

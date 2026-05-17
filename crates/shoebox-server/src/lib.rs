@@ -3,6 +3,7 @@
 
 pub mod backup;
 pub mod ca;
+pub mod cert_renewal;
 pub mod cli;
 pub mod config;
 pub mod db;
