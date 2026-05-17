@@ -50,8 +50,8 @@ const JPEG_REENCODE_QUALITY: u8 = 90;
 /// identify or decode the file, if none of the preview accessors
 /// returns an image, or if JPEG re-encoding fails.
 pub fn extract_preview(raw_path: &Path) -> Result<Vec<u8>> {
-    let raw_file_handle = File::open(raw_path)
-        .with_context(|| format!("opening RAW {}", raw_path.display()))?;
+    let raw_file_handle =
+        File::open(raw_path).with_context(|| format!("opening RAW {}", raw_path.display()))?;
     let mut raw_file = RawFile::from(BufReader::new(raw_file_handle));
 
     let decoder = rawler::get_decoder(&mut raw_file).map_err(|rawler_error| {
@@ -72,24 +72,9 @@ pub fn extract_preview(raw_path: &Path) -> Result<Vec<u8>> {
                 raw_path.display()
             )
         })?
-        .or_else(|| {
-            decoder
-                .preview_image(&mut raw_file)
-                .ok()
-                .flatten()
-        })
-        .or_else(|| {
-            decoder
-                .thumbnail_image(&mut raw_file)
-                .ok()
-                .flatten()
-        })
-        .ok_or_else(|| {
-            anyhow!(
-                "no embedded preview found in {}",
-                raw_path.display()
-            )
-        })?;
+        .or_else(|| decoder.preview_image(&mut raw_file).ok().flatten())
+        .or_else(|| decoder.thumbnail_image(&mut raw_file).ok().flatten())
+        .ok_or_else(|| anyhow!("no embedded preview found in {}", raw_path.display()))?;
 
     // rawler returns an `image` 0.24 `DynamicImage`. We can't name
     // that type here (workspace uses `image` 0.25), but we can call
@@ -101,19 +86,16 @@ pub fn extract_preview(raw_path: &Path) -> Result<Vec<u8>> {
     let rgb8_bytes = decoded_preview.to_rgb8().into_raw();
 
     let reencode_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(preview_width, preview_height, rgb8_bytes)
-            .ok_or_else(|| {
-                anyhow!(
-                    "rawler returned an RGB buffer with mismatched dimensions for {}",
-                    raw_path.display()
-                )
-            })?;
+        ImageBuffer::from_raw(preview_width, preview_height, rgb8_bytes).ok_or_else(|| {
+            anyhow!(
+                "rawler returned an RGB buffer with mismatched dimensions for {}",
+                raw_path.display()
+            )
+        })?;
 
     let mut jpeg_output = Cursor::new(Vec::<u8>::new());
-    let jpeg_encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-        &mut jpeg_output,
-        JPEG_REENCODE_QUALITY,
-    );
+    let jpeg_encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_output, JPEG_REENCODE_QUALITY);
     image::DynamicImage::ImageRgb8(reencode_buffer)
         .write_with_encoder(jpeg_encoder)
         .with_context(|| format!("re-encoding preview for {}", raw_path.display()))?;
