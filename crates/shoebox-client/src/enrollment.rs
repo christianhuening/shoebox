@@ -19,7 +19,7 @@ use crate::mtls_http;
 
 /// Parsed shape of `/enroll`'s response (mirrors `shoebox-server`'s
 /// `EnrollResponse`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EnrollResult {
     pub client_cert_pem: String,
     pub ca_cert_pem: String,
