@@ -786,8 +786,20 @@ impl App {
                 )
             }
 
-            // Library view messages — handled in Task 23 (Plan 1.4b).
-            Message::LibraryKeyboardNavigation(_) | Message::LibraryClearError => {
+            Message::LibraryKeyboardNavigation(direction) => {
+                let total = self.state.library_view.grid.len();
+                let cells_per_row = self.state.library_view.cells_per_row.max(4);
+                let next = shoebox_client::library_state::advance_selection(
+                    self.state.library_view.selected_grid_index,
+                    total,
+                    cells_per_row,
+                    direction,
+                );
+                self.state.library_view.selected_grid_index = next;
+                command_for_detail(&self.state)
+            }
+            Message::LibraryClearError => {
+                self.state.library_view.error = None;
                 iced::Task::none()
             }
         }

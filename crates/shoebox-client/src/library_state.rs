@@ -69,7 +69,7 @@ pub enum LockStatus {
     HeldByOtherTakeoverPending { holder_display_name: String },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LibraryViewState {
     pub folder_tree: Vec<FolderRow>,
     pub selected_folder_id: Option<String>,
@@ -80,6 +80,22 @@ pub struct LibraryViewState {
     pub error: Option<String>,
     pub cells_per_row: usize,
     pub keyword_input: String,
+}
+
+impl Default for LibraryViewState {
+    fn default() -> Self {
+        Self {
+            folder_tree: Vec::new(),
+            selected_folder_id: None,
+            grid: Vec::new(),
+            selected_grid_index: None,
+            detail: None,
+            lock_status: LockStatus::Free,
+            error: None,
+            cells_per_row: 4,
+            keyword_input: String::new(),
+        }
+    }
 }
 
 #[allow(dead_code)]
