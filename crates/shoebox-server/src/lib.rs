@@ -15,6 +15,7 @@ pub mod janitor;
 pub mod locks_http;
 pub mod logging;
 pub mod mdns;
+pub mod metrics;
 pub mod mtls;
 pub mod proxy;
 pub mod raw_preview;

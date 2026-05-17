@@ -1,6 +1,6 @@
 use shoebox_server::{
-    backup, ca, cli, config, db, http, indexer, janitor, logging, mdns, mtls, revoke, secret,
-    sqld_embed, tls_server,
+    backup, ca, cli, config, db, http, indexer, janitor, logging, mdns, metrics, mtls, revoke,
+    secret, sqld_embed, tls_server,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -55,18 +55,7 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     // background task to refresh it every 30 seconds.
     let crl = mtls::CrlCache::new();
     refresh_crl(&db, &crl).await?;
-    tokio::spawn({
-        let db_for_crl = db.clone();
-        let crl_for_task = crl.clone();
-        async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                if let Err(e) = refresh_crl(&db_for_crl, &crl_for_task).await {
-                    tracing::warn!(event = "crl.refresh.error", error = %e);
-                }
-            }
-        }
-    });
+    spawn_crl_refresher(db.clone(), crl.clone());
 
     let tls_cfg = mtls::mtls_server_config(&server_cert, &server_kp, &ca, crl.clone())?;
 
@@ -107,12 +96,16 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     // orphaned thumbnail GC. Always runs (unlike the indexer, which is
     // gated on `photos_dir` existing).
     let (janitor_shutdown_tx, janitor_shutdown_rx) = oneshot::channel();
-    let janitor_db = db.clone();
-    let janitor_cache = cfg.cache_dir.clone();
-    let janitor_task = tokio::spawn(janitor::run(janitor_db, janitor_cache, janitor_shutdown_rx));
+    let janitor_task = tokio::spawn(janitor::run(
+        db.clone(),
+        cfg.cache_dir.clone(),
+        janitor_shutdown_rx,
+    ));
 
     // Periodic VACUUM INTO snapshot of the catalog with last-14 retention.
     let (backup_shutdown_tx, backup_task) = spawn_backup(db.clone(), &cfg.data_dir);
+    // Periodic refresh of Prometheus gauges; aborted when the runtime drops.
+    let _metrics_updater = spawn_metrics_updater(db.clone());
 
     let state = http::AppState {
         db,
@@ -162,6 +155,54 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     broadcaster.shutdown();
     embedded_sqld.shutdown().await;
     result
+}
+
+/// Spawn the periodic CRL-refresh background task. The handle is dropped
+/// intentionally — the task is aborted when the tokio runtime shuts down
+/// at the end of `serve_main`. Errors during a refresh are logged but do
+/// not stop the loop; the previously-cached CRL stays in effect.
+fn spawn_crl_refresher(db: Arc<db::Db>, crl: mtls::CrlCache) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            if let Err(e) = refresh_crl(&db, &crl).await {
+                tracing::warn!(event = "crl.refresh.error", error = %e);
+            }
+        }
+    });
+}
+
+/// Spawn the periodic Prometheus gauge updater. Refreshes the
+/// `shoebox_active_sessions` and `shoebox_active_develop_locks` gauges every
+/// 30 seconds via direct catalog queries. `shoebox_disk_bytes_free` is left
+/// at zero in v1 (no `statfs` dep yet); `shoebox_cert_days_until_expiry`
+/// will be populated by Task 18 (cert auto-renewal).
+///
+/// Returns a `JoinHandle` that the caller is free to drop — the task is
+/// aborted implicitly when the tokio runtime shuts down at the end of
+/// `serve_main`.
+fn spawn_metrics_updater(db: Arc<db::Db>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            let Ok(conn) = db.connect() else { continue };
+            if let Ok(mut rows) = conn.query("SELECT COUNT(*) FROM sessions", ()).await {
+                if let Ok(Some(row)) = rows.next().await {
+                    if let Ok(count) = row.get::<i64>(0) {
+                        metrics::METRICS.active_sessions.set(count);
+                    }
+                }
+            }
+            if let Ok(mut rows) = conn.query("SELECT COUNT(*) FROM develop_locks", ()).await {
+                if let Ok(Some(row)) = rows.next().await {
+                    if let Ok(count) = row.get::<i64>(0) {
+                        metrics::METRICS.active_develop_locks.set(count);
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Spawn the periodic catalog-backup task and return its shutdown channel

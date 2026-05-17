@@ -47,6 +47,7 @@ pub fn public_router(state: AppState) -> Router {
 pub fn health_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .merge(crate::metrics::route())
         .with_state(state)
 }
 
