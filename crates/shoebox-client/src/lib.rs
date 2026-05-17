@@ -12,3 +12,4 @@ pub mod enrollment;
 pub mod mtls_http;
 pub mod replica;
 pub mod screens;
+pub mod thumb_cache;
