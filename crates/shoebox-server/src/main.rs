@@ -1,4 +1,5 @@
 mod config;
+mod db;
 mod logging;
 
 fn main() {
