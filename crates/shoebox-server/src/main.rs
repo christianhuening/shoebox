@@ -1,5 +1,8 @@
 mod config;
+mod logging;
 
 fn main() {
-    println!("shoebox-server stub");
+    logging::init();
+    tracing::info!(event = "startup", "shoebox-server starting");
+    println!("(stub: nothing running yet)");
 }
