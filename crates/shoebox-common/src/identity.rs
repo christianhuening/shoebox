@@ -20,10 +20,15 @@ impl fmt::Display for UserId {
 impl FromStr for UserId {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() == 32 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        if s.len() == 32
+            && s.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
             Ok(Self(s.to_string()))
         } else {
-            Err(format!("invalid UserId: {s:?} (expected 32 lowercase hex chars)"))
+            Err(format!(
+                "invalid UserId: {s:?} (expected 32 lowercase hex chars)"
+            ))
         }
     }
 }
@@ -41,10 +46,15 @@ impl fmt::Display for MachineId {
 impl FromStr for MachineId {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() == 32 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        if s.len() == 32
+            && s.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
             Ok(Self(s.to_string()))
         } else {
-            Err(format!("invalid MachineId: {s:?} (expected 32 lowercase hex chars)"))
+            Err(format!(
+                "invalid MachineId: {s:?} (expected 32 lowercase hex chars)"
+            ))
         }
     }
 }

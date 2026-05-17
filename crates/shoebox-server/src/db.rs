@@ -328,9 +328,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
         assert!(!db.is_serial_revoked("abc123").await.unwrap());
-        db.insert_revoked_cert("abc123", Some("test"), None).await.unwrap();
+        db.insert_revoked_cert("abc123", Some("test"), None)
+            .await
+            .unwrap();
         assert!(db.is_serial_revoked("abc123").await.unwrap());
         // Idempotent: inserting again does not error.
-        db.insert_revoked_cert("abc123", Some("test"), None).await.unwrap();
+        db.insert_revoked_cert("abc123", Some("test"), None)
+            .await
+            .unwrap();
     }
 }

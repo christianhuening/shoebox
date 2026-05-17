@@ -19,7 +19,11 @@ fn load_config() -> anyhow::Result<config::Config> {
         tracing::info!(event = "config.load", path = %p, "loading config file");
         config::Config::load_from_path(std::path::Path::new(&p))?
     } else {
-        tracing::info!(event = "config.load", source = "env", "no SHOEBOX_CONFIG; building from env");
+        tracing::info!(
+            event = "config.load",
+            source = "env",
+            "no SHOEBOX_CONFIG; building from env"
+        );
         config::Config::from_env_with_defaults()
     })
 }
@@ -75,7 +79,10 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
             );
         }
         secret::EnsureOutcome::AlreadySet => {
-            tracing::info!(event = "secret.loaded", "enrollment secret already configured");
+            tracing::info!(
+                event = "secret.loaded",
+                "enrollment secret already configured"
+            );
         }
     }
 
@@ -136,10 +143,7 @@ async fn serve_health(
 /// Load all revoked cert serials from the database and update the in-memory
 /// CRL cache. Called once at startup and then every 30 seconds in a background
 /// task, so revocation takes effect within at most one refresh interval.
-async fn refresh_crl(
-    db: &std::sync::Arc<db::Db>,
-    crl: &mtls::CrlCache,
-) -> anyhow::Result<()> {
+async fn refresh_crl(db: &std::sync::Arc<db::Db>, crl: &mtls::CrlCache) -> anyhow::Result<()> {
     let conn = db.connect()?;
     let mut rows = conn
         .query("SELECT serial_number FROM revoked_certs", ())

@@ -34,12 +34,8 @@ pub struct PeerCertAcceptor {
 
 impl<I, S> axum_server::accept::Accept<I, S> for PeerCertAcceptor
 where
-    axum_server::tls_rustls::RustlsAcceptor: axum_server::accept::Accept<
-        I,
-        S,
-        Stream = tokio_rustls::server::TlsStream<I>,
-        Service = S,
-    >,
+    axum_server::tls_rustls::RustlsAcceptor:
+        axum_server::accept::Accept<I, S, Stream = tokio_rustls::server::TlsStream<I>, Service = S>,
     <axum_server::tls_rustls::RustlsAcceptor as axum_server::accept::Accept<I, S>>::Future:
         Send + 'static,
     I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -50,10 +46,7 @@ where
     type Future = Pin<
         Box<
             dyn Future<
-                    Output = io::Result<(
-                        tokio_rustls::server::TlsStream<I>,
-                        CertInjectService<S>,
-                    )>,
+                    Output = io::Result<(tokio_rustls::server::TlsStream<I>, CertInjectService<S>)>,
                 > + Send,
         >,
     >;
@@ -68,7 +61,13 @@ where
                 .peer_certificates()
                 .and_then(|certs| certs.first())
                 .and_then(|der| identity::PeerCertChain::from_der(der.to_vec()));
-            Ok((tls_stream, CertInjectService { inner: svc, peer_chain }))
+            Ok((
+                tls_stream,
+                CertInjectService {
+                    inner: svc,
+                    peer_chain,
+                },
+            ))
         })
     }
 }
@@ -122,7 +121,9 @@ pub async fn serve_public_tls(
 
     let rustls_cfg = RustlsConfig::from_config(tls_cfg);
     let inner_acceptor = RustlsAcceptor::new(rustls_cfg);
-    let acceptor = PeerCertAcceptor { inner: inner_acceptor };
+    let acceptor = PeerCertAcceptor {
+        inner: inner_acceptor,
+    };
 
     tracing::info!(event = "https.listen.public", addr = %addr, "public TLS server bound");
     let handle = axum_server::Handle::new();

@@ -50,7 +50,10 @@ async fn enroll_handler(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("verify: {e}")))?;
     if !ok {
-        return Err((StatusCode::UNAUTHORIZED, "invalid shared secret".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "invalid shared secret".to_string(),
+        ));
     }
 
     // Resolve user_id: either re-use existing (verify it exists) or create.
@@ -113,8 +116,8 @@ fn sign_csr(
     machine_id: &MachineId,
 ) -> Result<IssuedCert> {
     // Parse the CSR to extract the public key.
-    let csr = rcgen::CertificateSigningRequestParams::from_pem(csr_pem)
-        .context("parsing CSR PEM")?;
+    let csr =
+        rcgen::CertificateSigningRequestParams::from_pem(csr_pem).context("parsing CSR PEM")?;
     ca.issue_client_cert(&csr.public_key, user_id, machine_id)
 }
 
@@ -166,8 +169,13 @@ async fn renew_handler(
     identity: crate::identity::ClientIdentity,
     Json(req): Json<RenewRequest>,
 ) -> Result<(StatusCode, Json<RenewResponse>), (StatusCode, String)> {
-    let issued = sign_csr(&state.ca, &req.csr_pem, &identity.user_id, &identity.machine_id)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("csr: {e}")))?;
+    let issued = sign_csr(
+        &state.ca,
+        &req.csr_pem,
+        &identity.user_id,
+        &identity.machine_id,
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("csr: {e}")))?;
 
     tracing::info!(
         event = "renewal.completed",

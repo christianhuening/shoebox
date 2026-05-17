@@ -18,18 +18,15 @@ const CONFIG_KEY: &str = "enrollment_secret_hash";
 /// Verify a presented plaintext against the stored argon2id hash.
 pub async fn verify(conn: &Connection, presented: &str) -> Result<bool> {
     let mut rows = conn
-        .query(
-            "SELECT value FROM config WHERE key = ?1",
-            [CONFIG_KEY],
-        )
+        .query("SELECT value FROM config WHERE key = ?1", [CONFIG_KEY])
         .await
         .context("reading enrollment_secret_hash")?;
     let Some(row) = rows.next().await? else {
         return Ok(false);
     };
     let hash_str: String = row.get(0)?;
-    let parsed = PasswordHash::new(&hash_str)
-        .map_err(|e| anyhow!("malformed stored secret hash: {e}"))?;
+    let parsed =
+        PasswordHash::new(&hash_str).map_err(|e| anyhow!("malformed stored secret hash: {e}"))?;
     Ok(Argon2::default()
         .verify_password(presented.as_bytes(), &parsed)
         .is_ok())
@@ -41,10 +38,7 @@ pub async fn verify(conn: &Connection, presented: &str) -> Result<bool> {
 /// can log it exactly once at bootstrap.
 pub async fn ensure_present(conn: &Connection) -> Result<EnsureOutcome> {
     let mut rows = conn
-        .query(
-            "SELECT 1 FROM config WHERE key = ?1",
-            [CONFIG_KEY],
-        )
+        .query("SELECT 1 FROM config WHERE key = ?1", [CONFIG_KEY])
         .await?;
     if rows.next().await?.is_some() {
         return Ok(EnsureOutcome::AlreadySet);

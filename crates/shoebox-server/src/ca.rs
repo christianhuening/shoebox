@@ -65,8 +65,8 @@ impl Ca {
             let cert_pem = fs::read_to_string(&cert_path)
                 .with_context(|| format!("reading {}", cert_path.display()))?;
 
-            let root_keypair = KeyPair::from_pem(&key_pem)
-                .map_err(|e| anyhow!("parsing CA key PEM: {e}"))?;
+            let root_keypair =
+                KeyPair::from_pem(&key_pem).map_err(|e| anyhow!("parsing CA key PEM: {e}"))?;
 
             // Parse the persisted cert's params so we can reconstruct an issuer
             // Certificate. The reconstructed cert may have a new serial but its
@@ -249,7 +249,13 @@ pub fn build_server_sans(server_name: &str, extras: &[String]) -> Vec<String> {
 
 fn sanitize_host_label(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 

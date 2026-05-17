@@ -96,10 +96,7 @@ pub struct ClientIdentity {
 impl<S: Send + Sync> FromRequestParts<S> for ClientIdentity {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let chain = parts
             .extensions
             .get::<PeerCertChain>()
@@ -129,10 +126,7 @@ pub struct MaybeClientIdentity(pub Option<ClientIdentity>);
 impl<S: Send + Sync> FromRequestParts<S> for MaybeClientIdentity {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         Ok(MaybeClientIdentity(
             ClientIdentity::from_request_parts(parts, state).await.ok(),
         ))

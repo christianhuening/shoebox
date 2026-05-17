@@ -14,9 +14,7 @@ async fn full_server_serves_health() {
             .unwrap(),
     );
 
-    let ca = Arc::new(
-        shoebox_server::ca::Ca::open(tmp.path()).unwrap(),
-    );
+    let ca = Arc::new(shoebox_server::ca::Ca::open(tmp.path()).unwrap());
     let state = shoebox_server::http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,

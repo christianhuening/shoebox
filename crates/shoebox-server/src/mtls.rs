@@ -58,7 +58,9 @@ impl ClientCertVerifier for CrlAwareVerifier {
         intermediates: &[CertificateDer<'_>],
         now: rustls::pki_types::UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
-        let verified = self.inner.verify_client_cert(end_entity, intermediates, now)?;
+        let verified = self
+            .inner
+            .verify_client_cert(end_entity, intermediates, now)?;
         let serial_hex = {
             use x509_parser::prelude::*;
             match X509Certificate::from_der(end_entity.as_ref()) {

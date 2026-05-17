@@ -62,7 +62,11 @@ impl Config {
             }
         }
         if let Ok(v) = std::env::var("SHOEBOX_EXTRA_SANS") {
-            self.extra_sans = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            self.extra_sans = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
         }
         self
     }
@@ -104,7 +108,12 @@ impl Config {
                 .parse()
                 .expect("SHOEBOX_HEALTH_BIND_ADDR must parse as SocketAddr"),
             extra_sans: std::env::var("SHOEBOX_EXTRA_SANS")
-                .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default(),
         }
     }
