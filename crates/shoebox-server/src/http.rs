@@ -33,6 +33,7 @@ pub struct HealthResponse {
 /// - /whoami — requires a valid client cert (`ClientIdentity` extractor enforces this)
 pub fn public_router(state: AppState) -> Router {
     Router::new()
+        .merge(crate::ca_cert::route())
         .merge(crate::enroll::route())
         .merge(crate::enroll::renew_route())
         .merge(crate::whoami::route())
