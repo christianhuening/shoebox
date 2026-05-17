@@ -1,20 +1,31 @@
-use shoebox_server::{ca, config, db, http, identity, logging, mdns, mtls, secret};
+use shoebox_server::{ca, cli, config, db, http, identity, logging, mdns, mtls, revoke, secret};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     logging::init();
-    mtls::install_crypto_provider();
+    let cli = <cli::Cli as clap::Parser>::parse();
+    let cfg = load_config()?;
+    match cli.command.unwrap_or(cli::Command::Serve) {
+        cli::Command::Serve => serve_main(cfg).await,
+        cli::Command::Revoke(args) => revoke::run(&args, &cfg).await,
+    }
+}
 
+fn load_config() -> anyhow::Result<config::Config> {
     let cfg_path = std::env::var("SHOEBOX_CONFIG").ok();
-    let cfg = if let Some(p) = cfg_path {
+    Ok(if let Some(p) = cfg_path {
         tracing::info!(event = "config.load", path = %p, "loading config file");
         config::Config::load_from_path(std::path::Path::new(&p))?
     } else {
         tracing::info!(event = "config.load", source = "env", "no SHOEBOX_CONFIG; building from env");
         config::Config::from_env_with_defaults()
-    };
+    })
+}
+
+async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
+    mtls::install_crypto_provider();
 
     tracing::info!(
         event = "startup",
