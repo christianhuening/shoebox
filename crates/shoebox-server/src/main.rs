@@ -1,4 +1,4 @@
-use shoebox_server::{ca, cli, config, db, http, identity, logging, mdns, mtls, revoke, secret};
+use shoebox_server::{ca, cli, config, db, http, logging, mdns, mtls, revoke, secret, tls_server};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -110,7 +110,7 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
         }
     });
 
-    let result = serve_public_tls(cfg.bind_addr, state, tls_cfg, shutdown_rx).await;
+    let result = tls_server::serve_public_tls(cfg.bind_addr, state, tls_cfg, shutdown_rx).await;
     let _ = shutdown_health_tx.send(());
     broadcaster.shutdown();
     result
@@ -129,140 +129,6 @@ async fn serve_health(
         })
         .await?;
     Ok(())
-}
-
-async fn serve_public_tls(
-    addr: std::net::SocketAddr,
-    state: http::AppState,
-    tls_cfg: std::sync::Arc<rustls::ServerConfig>,
-    shutdown: oneshot::Receiver<()>,
-) -> anyhow::Result<()> {
-    use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
-
-    let rustls_cfg = RustlsConfig::from_config(tls_cfg);
-    let inner_acceptor = RustlsAcceptor::new(rustls_cfg);
-    let acceptor = PeerCertAcceptor { inner: inner_acceptor };
-
-    tracing::info!(event = "https.listen.public", addr = %addr, "public TLS server bound");
-    let handle = axum_server::Handle::new();
-    let handle_for_shutdown = handle.clone();
-    tokio::spawn(async move {
-        let _ = shutdown.await;
-        handle_for_shutdown.graceful_shutdown(Some(std::time::Duration::from_secs(5)));
-    });
-
-    axum_server::bind(addr)
-        .acceptor(acceptor)
-        .handle(handle)
-        .serve(http::public_router(state).into_make_service())
-        .await?;
-    Ok(())
-}
-
-// ── PeerCertAcceptor ──────────────────────────────────────────────────────────
-//
-// Custom `Accept` implementation that wraps `RustlsAcceptor`.  After the TLS
-// handshake completes we read `peer_certificates()` from the
-// `tokio_rustls::server::TlsStream`, parse the leaf cert into a
-// `PeerCertChain`, and wrap the per-connection service in a `CertInjectService`
-// that inserts the chain (or nothing, if the client sent no cert) into every
-// request's extension map.
-//
-// This is the only reliable way to surface peer-cert data to axum handlers in
-// axum-server 0.7: the crate exposes no higher-level API for it.
-
-/// Wraps `RustlsAcceptor` to capture the peer cert at handshake time and
-/// inject it as a request extension via `CertInjectService`.
-#[derive(Clone)]
-struct PeerCertAcceptor {
-    inner: axum_server::tls_rustls::RustlsAcceptor,
-}
-
-use std::future::Future;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-impl<I, S> axum_server::accept::Accept<I, S> for PeerCertAcceptor
-where
-    axum_server::tls_rustls::RustlsAcceptor: axum_server::accept::Accept<
-        I,
-        S,
-        Stream = tokio_rustls::server::TlsStream<I>,
-        Service = S,
-    >,
-    <axum_server::tls_rustls::RustlsAcceptor as axum_server::accept::Accept<I, S>>::Future:
-        Send + 'static,
-    I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
-    S: Clone + Send + 'static,
-{
-    type Stream = tokio_rustls::server::TlsStream<I>;
-    type Service = CertInjectService<S>;
-    /// Boxed future — avoids the need for `pin-project` / unsafe.
-    type Future = Pin<
-        Box<
-            dyn Future<
-                    Output = io::Result<(
-                        tokio_rustls::server::TlsStream<I>,
-                        CertInjectService<S>,
-                    )>,
-                > + Send,
-        >,
-    >;
-
-    fn accept(&self, stream: I, service: S) -> Self::Future {
-        let inner_future = axum_server::accept::Accept::accept(&self.inner, stream, service);
-        Box::pin(async move {
-            let (tls_stream, svc) = inner_future.await?;
-            // Extract peer cert chain from the completed TLS handshake.
-            // `get_ref()` → `(&IO, &ServerConnection)`.
-            // `ServerConnection: Deref<Target = CommonState>`,
-            // which has `peer_certificates() → Option<&[CertificateDer]>`.
-            let peer_chain = tls_stream
-                .get_ref()
-                .1
-                .peer_certificates()
-                .and_then(|certs| certs.first())
-                .and_then(|der| identity::PeerCertChain::from_der(der.to_vec()));
-            Ok((tls_stream, CertInjectService { inner: svc, peer_chain }))
-        })
-    }
-}
-
-
-// ── CertInjectService ─────────────────────────────────────────────────────────
-//
-// A thin tower `Service` wrapper that inserts an `Option<PeerCertChain>` into
-// request extensions before forwarding to the inner service.  A `PeerCertChain`
-// is present only when the client presented a valid cert during the TLS handshake.
-
-#[derive(Clone)]
-struct CertInjectService<S> {
-    inner: S,
-    peer_chain: Option<identity::PeerCertChain>,
-}
-
-impl<S, ReqBody> tower::Service<axum::http::Request<ReqBody>> for CertInjectService<S>
-where
-    S: tower::Service<axum::http::Request<ReqBody>>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), <S as tower::Service<axum::http::Request<ReqBody>>>::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: axum::http::Request<ReqBody>) -> S::Future {
-        if let Some(chain) = self.peer_chain.clone() {
-            req.extensions_mut().insert(chain);
-        }
-        self.inner.call(req)
-    }
 }
 
 // ── CRL refresh ───────────────────────────────────────────────────────────────

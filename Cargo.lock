@@ -1895,6 +1895,7 @@ dependencies = [
  "include_dir",
  "libsql",
  "mdns-sd",
+ "parking_lot",
  "rand 0.8.6",
  "rcgen",
  "reqwest",
