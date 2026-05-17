@@ -59,5 +59,6 @@ tower = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 which = "6"
+axum = { workspace = true }
 shoebox-server = { path = "../shoebox-server" }
 shoebox-common = { path = "../shoebox-common" }
