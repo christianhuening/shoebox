@@ -230,6 +230,79 @@ pub async fn load_grid_for_folder(
     Ok(cells)
 }
 
+pub async fn load_detail(
+    conn: &libsql::Connection,
+    variant_id: &str,
+    user_id: &str,
+) -> Result<DetailLoaded> {
+    let mut rows = conn
+        .query(
+            "SELECT p.id, p.camera_make, p.camera_model, p.lens,
+                    p.iso, p.aperture, p.shutter_us, p.focal_length_mm,
+                    p.width_px, p.height_px, p.captured_at
+             FROM variants v JOIN photos p ON p.id = v.photo_id
+             WHERE v.id = ?1",
+            [variant_id],
+        )
+        .await
+        .context("loading detail row")?;
+    let row = rows
+        .next()
+        .await?
+        .context("no variant row")?;
+
+    let photo_id: String = row.get(0)?;
+    let exif = ExifSummary {
+        camera_make: row.get(1)?,
+        camera_model: row.get(2)?,
+        lens: row.get(3)?,
+        iso: row.get(4)?,
+        aperture: row.get(5)?,
+        shutter_us: row.get(6)?,
+        focal_length_mm: row.get(7)?,
+        width_px: row.get(8)?,
+        height_px: row.get(9)?,
+        captured_at_unix_ms: row.get(10)?,
+    };
+
+    let mut rating_rows = conn
+        .query(
+            "SELECT rating FROM variant_user_state WHERE variant_id=?1 AND user_id=?2",
+            (variant_id, user_id),
+        )
+        .await?;
+    let rating = if let Some(row) = rating_rows.next().await? {
+        let value: Option<i64> = row.get(0)?;
+        u8::try_from(value.unwrap_or(0).clamp(0, 5)).unwrap_or(0)
+    } else {
+        0
+    };
+
+    let mut keyword_rows = conn
+        .query(
+            "SELECT k.id, k.name FROM photo_keywords pk
+             JOIN keywords k ON k.id = pk.keyword_id
+             WHERE pk.photo_id = ?1 ORDER BY k.name",
+            [photo_id.as_str()],
+        )
+        .await?;
+    let mut keywords = Vec::new();
+    while let Some(row) = keyword_rows.next().await? {
+        keywords.push(KeywordRow {
+            id: row.get(0)?,
+            name: row.get(1)?,
+        });
+    }
+
+    Ok(DetailLoaded {
+        variant_id: variant_id.to_string(),
+        photo_id,
+        exif,
+        rating,
+        keywords,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +507,34 @@ mod tests {
         assert_eq!(cells[1].display_name, "one.pef (2)");
         assert_eq!(cells[2].variant_id, "v3");
         assert_eq!(cells[2].display_name, "two.pef");
+    }
+
+    #[tokio::test]
+    async fn load_detail_returns_exif_rating_and_keywords() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        conn.execute("UPDATE photos SET camera_make='Pentax', camera_model='K-1', iso=400 WHERE id='p1'", ()).await.unwrap();
+        insert_variant(&conn, "v1", "p1", 0).await;
+        conn.execute("INSERT INTO variant_user_state(variant_id, user_id, rating, updated_at) VALUES('v1','u1', 4, 0)", ()).await.unwrap();
+        conn.execute("INSERT INTO keywords(id, name, created_at) VALUES('k1', 'landscape', 0)", ()).await.unwrap();
+        conn.execute("INSERT INTO photo_keywords(photo_id, keyword_id, added_by, added_at) VALUES('p1','k1','u1',0)", ()).await.unwrap();
+
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert_eq!(detail.exif.camera_make.as_deref(), Some("Pentax"));
+        assert_eq!(detail.exif.iso, Some(400));
+        assert_eq!(detail.rating, 4);
+        assert_eq!(detail.keywords.len(), 1);
+        assert_eq!(detail.keywords[0].name, "landscape");
+    }
+
+    #[tokio::test]
+    async fn load_detail_returns_zero_rating_when_no_user_state() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_variant(&conn, "v1", "p1", 0).await;
+        let detail = load_detail(&conn, "v1", "u1").await.unwrap();
+        assert_eq!(detail.rating, 0);
     }
 }
