@@ -43,6 +43,7 @@ clap = { workspace = true }
 x509-parser = { workspace = true }
 time = { workspace = true }
 hex = { workspace = true }
+if-addrs = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
