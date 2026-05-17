@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 
-FROM rust:1.85-slim-bookworm AS builder
+FROM rust:1.95-slim-bookworm AS builder
 
 # Build dependencies first for caching: copy manifests, fetch deps,
 # then copy sources and build.
