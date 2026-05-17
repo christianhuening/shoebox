@@ -1,10 +1,12 @@
-//! TLS server configuration and (in Task 9) client-cert verifier.
+//! TLS server configuration and client-cert verifier.
 
 use anyhow::{anyhow, Result};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::ServerConfig;
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig};
 use std::sync::Arc;
 
+use crate::ca::Ca;
 use crate::ca::IssuedCert;
 
 /// Install the default rustls crypto provider exactly once at startup.
@@ -13,18 +15,36 @@ pub fn install_crypto_provider() {
     let _ = default_provider().install_default();
 }
 
-/// Build a server TLS config from an issued server cert + its keypair.
-/// Does NOT yet require client certs (that's Task 9).
-pub fn server_only_tls_config(
+/// Build a server TLS config that:
+///   - serves our server cert
+///   - REQUESTS (but does not require) a client cert
+///   - if a client cert is presented, it must chain to our CA root
+///
+/// Per-route "require auth" is enforced separately in middleware
+/// (Task 10) by checking whether the peer cert extension was populated.
+pub fn mtls_server_config(
     server_cert: &IssuedCert,
     server_keypair: &rcgen::KeyPair,
+    ca: &Ca,
 ) -> Result<Arc<ServerConfig>> {
     let cert_der = CertificateDer::from(server_cert.cert_der.clone());
     let key_pem = server_keypair.serialize_pem();
     let key_der = parse_first_private_key(&key_pem)?;
 
+    let mut roots = RootCertStore::empty();
+    roots
+        .add(CertificateDer::from(ca.root_cert_der.clone()))
+        .map_err(|e| anyhow!("loading CA root into trust store: {e}"))?;
+    let roots = Arc::new(roots);
+
+    // WebPkiClientVerifier in optional mode: request but don't require.
+    let verifier = WebPkiClientVerifier::builder(roots)
+        .allow_unauthenticated()
+        .build()
+        .map_err(|e| anyhow!("building client verifier: {e}"))?;
+
     let config = ServerConfig::builder()
-        .with_no_client_auth()
+        .with_client_cert_verifier(verifier)
         .with_single_cert(vec![cert_der], key_der)
         .map_err(|e| anyhow!("building rustls ServerConfig: {e}"))?;
     Ok(Arc::new(config))

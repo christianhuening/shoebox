@@ -29,10 +29,10 @@ async fn main() -> anyhow::Result<()> {
     let db = Arc::new(db::Db::open(&cfg.data_dir.join("catalog.db")).await?);
 
     // Bootstrap CA and ensure server cert.
-    let ca = ca::Ca::open(&cfg.data_dir)?;
+    let ca = Arc::new(ca::Ca::open(&cfg.data_dir)?);
     let sans = ca::build_server_sans(&cfg.server_name, &cfg.extra_sans);
     let (server_cert, server_kp) = ca.issue_server_cert(&sans)?;
-    let tls_cfg = mtls::server_only_tls_config(&server_cert, &server_kp)?;
+    let tls_cfg = mtls::mtls_server_config(&server_cert, &server_kp, &ca)?;
 
     // Bootstrap shared catalog secret.
     let conn = db.connect()?;
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
-        ca: Arc::new(ca),
+        ca,
     };
 
     let broadcaster = mdns::MdnsBroadcaster::start(
