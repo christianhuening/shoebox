@@ -34,9 +34,7 @@ async fn full_server_serves_health() {
             .unwrap();
     });
 
-    let resp = reqwest::get(format!("http://{addr}/health"))
-        .await
-        .unwrap();
+    let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
