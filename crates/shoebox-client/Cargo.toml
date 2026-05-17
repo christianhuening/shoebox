@@ -33,6 +33,7 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 mdns-sd = { workspace = true }
 hex = { workspace = true }
+blake3 = { workspace = true }
 time = { workspace = true }
 iced = { workspace = true }
 keyring = { workspace = true }

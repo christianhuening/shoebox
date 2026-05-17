@@ -4753,6 +4753,7 @@ name = "shoebox-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "directories",
  "futures-util",
  "hex",

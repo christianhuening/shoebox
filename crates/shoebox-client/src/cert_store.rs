@@ -7,8 +7,11 @@
 //! separate, and the cert ↔ key are stored as siblings.
 
 use anyhow::{anyhow, Context, Result};
+use std::path::{Path, PathBuf};
 
 const SERVICE_PREFIX: &str = "shoebox-client";
+const FILE_CERT_NAME: &str = "client.cert.pem";
+const FILE_KEY_NAME: &str = "client.key.pem";
 
 /// Identifies which half of a cert pair an entry holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +91,104 @@ pub fn delete_from_keyring(server_url: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Returns the directory under which `store_in_file` / `load_from_file`
+/// place the cert + key files for `server_url`. Hashes the URL into the
+/// filename so multiple servers don't collide.
+fn file_storage_dir(server_url: &str) -> Option<PathBuf> {
+    let project_dirs = directories::ProjectDirs::from("io", "shoebox", "shoebox-client")?;
+    let server_slug = hex::encode(blake3::hash(server_url.as_bytes()).as_bytes());
+    Some(
+        project_dirs
+            .data_local_dir()
+            .join("certs")
+            .join(server_slug),
+    )
+}
+
+/// Store (cert, key) on disk under the app-data dir with mode 0600 on Unix.
+/// Caller has already consented to file storage (e.g., keychain unavailable).
+///
+/// # Errors
+/// Returns an error on directory creation, file write, or permission set
+/// failure.
+pub fn store_in_file(server_url: &str, cert_pem: &str, key_pem: &str) -> Result<()> {
+    let storage_dir =
+        file_storage_dir(server_url).ok_or_else(|| anyhow!("could not determine app-data dir"))?;
+    std::fs::create_dir_all(&storage_dir)
+        .with_context(|| format!("creating {}", storage_dir.display()))?;
+
+    let cert_path = storage_dir.join(FILE_CERT_NAME);
+    let key_path = storage_dir.join(FILE_KEY_NAME);
+    write_with_mode_0600(&cert_path, cert_pem)?;
+    write_with_mode_0600(&key_path, key_pem)?;
+    Ok(())
+}
+
+/// Load (cert, key) from the file-storage dir, or `None` if not present.
+///
+/// # Errors
+/// Returns an error only on read failure of an existing file (missing
+/// files yield `Ok(None)`).
+pub fn load_from_file(server_url: &str) -> Result<Option<(String, String)>> {
+    let storage_dir =
+        file_storage_dir(server_url).ok_or_else(|| anyhow!("could not determine app-data dir"))?;
+    let cert_path = storage_dir.join(FILE_CERT_NAME);
+    let key_path = storage_dir.join(FILE_KEY_NAME);
+    if !cert_path.exists() || !key_path.exists() {
+        return Ok(None);
+    }
+    let cert_pem = std::fs::read_to_string(&cert_path)
+        .with_context(|| format!("reading {}", cert_path.display()))?;
+    let key_pem = std::fs::read_to_string(&key_path)
+        .with_context(|| format!("reading {}", key_path.display()))?;
+    Ok(Some((cert_pem, key_pem)))
+}
+
+/// Delete the file-stored cert + key for `server_url`. Missing files are OK.
+///
+/// # Errors
+/// Returns an error only on filesystem failure other than `NotFound`.
+pub fn delete_from_file(server_url: &str) -> Result<()> {
+    let Some(storage_dir) = file_storage_dir(server_url) else {
+        return Ok(());
+    };
+    for filename in [FILE_CERT_NAME, FILE_KEY_NAME] {
+        let target = storage_dir.join(filename);
+        match std::fs::remove_file(&target) {
+            Ok(()) => {}
+            Err(remove_err) if remove_err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(remove_err) => {
+                return Err(remove_err).with_context(|| format!("deleting {}", target.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_with_mode_0600(path: &Path, body: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    file.write_all(body.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_with_mode_0600(path: &Path, body: &str) -> Result<()> {
+    // On Windows, ACL the file to the current user. For v1 we rely on
+    // the per-user data dir already being protected; Plan 1.4b can
+    // tighten with a proper SDDL ACL.
+    std::fs::write(path, body).with_context(|| format!("writing {}", path.display()))
 }
 
 #[cfg(test)]
@@ -173,5 +274,35 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
         format!("{nanos:x}")
+    }
+
+    #[test]
+    fn file_storage_round_trip() {
+        let server_url = format!("https://file-test-{}.local:9000", uuid_like());
+        let cert = "fake-cert-bytes";
+        let key = "fake-key-bytes";
+
+        store_in_file(&server_url, cert, key).unwrap();
+        let loaded = load_from_file(&server_url).unwrap().unwrap();
+        assert_eq!(loaded.0, cert);
+        assert_eq!(loaded.1, key);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let storage_dir = file_storage_dir(&server_url).unwrap();
+            let cert_path = storage_dir.join(FILE_CERT_NAME);
+            let mode = std::fs::metadata(&cert_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "cert file must be mode 0600, got {mode:o}");
+        }
+
+        delete_from_file(&server_url).unwrap();
+        assert!(load_from_file(&server_url).unwrap().is_none());
+    }
+
+    #[test]
+    fn file_load_missing_returns_none() {
+        let server_url = format!("https://file-absent-{}.local:9000", uuid_like());
+        assert!(load_from_file(&server_url).unwrap().is_none());
     }
 }
