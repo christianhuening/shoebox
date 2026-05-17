@@ -168,6 +168,68 @@ fn flatten_folders(raw: &[(String, Option<String>, String)]) -> Vec<FolderRow> {
     out
 }
 
+/// Load all variants (master + virtual copies) for photos whose
+/// `photo_files.folder_id = folder_id`. Each variant is one grid cell.
+/// Cells are ordered by `(captured_at, photo_id, variant_index)`.
+pub async fn load_grid_for_folder(
+    conn: &libsql::Connection,
+    folder_id: &str,
+    user_id: &str,
+) -> Result<Vec<GridCell>> {
+    let mut rows = conn
+        .query(
+            "SELECT v.id, v.photo_id, v.variant_index, v.name,
+                    COALESCE(vus.rating, 0) AS rating,
+                    pf.path AS file_path,
+                    p.captured_at
+             FROM variants v
+             JOIN photos p ON p.id = v.photo_id
+             JOIN (
+                 SELECT photo_id, MIN(path) AS path, folder_id
+                 FROM photo_files
+                 GROUP BY photo_id
+             ) pf ON pf.photo_id = p.id
+             LEFT JOIN variant_user_state vus
+                 ON vus.variant_id = v.id AND vus.user_id = ?2
+             WHERE pf.folder_id = ?1
+             ORDER BY p.captured_at NULLS LAST, p.id, v.variant_index",
+            (folder_id, user_id),
+        )
+        .await
+        .context("loading grid")?;
+
+    let mut cells = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let variant_id: String = row.get(0)?;
+        let photo_id: String = row.get(1)?;
+        let variant_index: i64 = row.get(2)?;
+        let variant_name: Option<String> = row.get(3)?;
+        let rating: i64 = row.get(4)?;
+        let file_path: String = row.get(5)?;
+
+        let base_name = std::path::Path::new(&file_path)
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or(&file_path)
+            .to_string();
+        let display_name = match (&variant_name, variant_index) {
+            (Some(name), _) => name.clone(),
+            (None, 0) => base_name,
+            (None, n) => format!("{base_name} ({})", n + 1),
+        };
+
+        cells.push(GridCell {
+            variant_id,
+            photo_id,
+            variant_index,
+            display_name,
+            rating: u8::try_from(rating.clamp(0, 5)).unwrap_or(0),
+            thumbnail: None,
+        });
+    }
+    Ok(cells)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +326,113 @@ mod tests {
                 ("delta".to_string(), 0),
             ]
         );
+    }
+
+    async fn seed_full_schema(conn: &libsql::Connection) {
+        conn.execute_batch(
+            "CREATE TABLE folders (
+                id TEXT PRIMARY KEY, parent_id TEXT, path TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL, last_indexed_at INTEGER
+            );
+            CREATE TABLE photos (
+                id TEXT PRIMARY KEY, file_size INTEGER NOT NULL, file_format TEXT NOT NULL,
+                captured_at INTEGER, camera_make TEXT, camera_model TEXT, lens TEXT,
+                iso INTEGER, aperture REAL, shutter_us INTEGER, focal_length_mm REAL,
+                width_px INTEGER, height_px INTEGER, orientation INTEGER,
+                imported_at INTEGER NOT NULL, exif_json TEXT
+            );
+            CREATE TABLE photo_files (
+                id TEXT PRIMARY KEY, photo_id TEXT NOT NULL, folder_id TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE, file_mtime INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL, is_present INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE variants (
+                id TEXT PRIMARY KEY, photo_id TEXT NOT NULL, variant_index INTEGER NOT NULL,
+                name TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+                develop_settings_json TEXT NOT NULL, develop_settings_version INTEGER NOT NULL,
+                develop_updated_at INTEGER NOT NULL, develop_updated_by TEXT NOT NULL,
+                UNIQUE(photo_id, variant_index)
+            );
+            CREATE TABLE variant_user_state (
+                variant_id TEXT NOT NULL, user_id TEXT NOT NULL, rating INTEGER,
+                flag TEXT, color_label TEXT, updated_at INTEGER NOT NULL,
+                PRIMARY KEY (variant_id, user_id)
+            );
+            CREATE TABLE keywords (
+                id TEXT PRIMARY KEY, parent_id TEXT, name TEXT NOT NULL,
+                created_at INTEGER NOT NULL, UNIQUE(parent_id, name)
+            );
+            CREATE TABLE photo_keywords (
+                photo_id TEXT NOT NULL, keyword_id TEXT NOT NULL, added_by TEXT NOT NULL,
+                added_at INTEGER NOT NULL, PRIMARY KEY (photo_id, keyword_id)
+            );
+            CREATE TABLE develop_locks (
+                variant_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL, acquired_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL, takeover_requested_by TEXT,
+                takeover_requested_at INTEGER
+            );
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+                machine_id TEXT NOT NULL, started_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL
+            );",
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO users(id, display_name, created_at) VALUES('u1', 'Alice', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn open_full_conn() -> libsql::Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        seed_full_schema(&conn).await;
+        conn
+    }
+
+    async fn insert_photo(conn: &libsql::Connection, photo_id: &str, folder_id: &str, path: &str, captured_at: i64) {
+        conn.execute("INSERT INTO photos(id, file_size, file_format, captured_at, imported_at) VALUES(?1, 100, 'PEF', ?2, 0)", (photo_id, captured_at)).await.unwrap();
+        conn.execute("INSERT INTO photo_files(id, photo_id, folder_id, path, file_mtime, last_seen_at) VALUES(?1, ?2, ?3, ?4, 0, 0)",
+            (format!("{photo_id}-file"), photo_id, folder_id, path)).await.unwrap();
+    }
+
+    async fn insert_variant(conn: &libsql::Connection, id: &str, photo_id: &str, idx: i64) {
+        conn.execute(
+            "INSERT INTO variants(id, photo_id, variant_index, created_by, created_at,
+                develop_settings_json, develop_settings_version,
+                develop_updated_at, develop_updated_by)
+             VALUES(?1, ?2, ?3, 'u1', 0, '{}', 1, 0, 'u1')",
+            (id, photo_id, idx),
+        ).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn load_grid_returns_one_cell_per_variant_in_folder() {
+        let conn = open_full_conn().await;
+        conn.execute("INSERT INTO folders(id, path, name) VALUES('f1', '/x', 'X')", ()).await.unwrap();
+        insert_photo(&conn, "p1", "f1", "/x/one.pef", 100).await;
+        insert_variant(&conn, "v1", "p1", 0).await;
+        insert_variant(&conn, "v2", "p1", 1).await;
+        insert_photo(&conn, "p2", "f1", "/x/two.pef", 200).await;
+        insert_variant(&conn, "v3", "p2", 0).await;
+
+        let cells = load_grid_for_folder(&conn, "f1", "u1").await.unwrap();
+        assert_eq!(cells.len(), 3);
+        assert_eq!(cells[0].variant_id, "v1");
+        assert_eq!(cells[0].display_name, "one.pef");
+        assert_eq!(cells[1].variant_id, "v2");
+        assert_eq!(cells[1].display_name, "one.pef (2)");
+        assert_eq!(cells[2].variant_id, "v3");
+        assert_eq!(cells[2].display_name, "two.pef");
     }
 }
