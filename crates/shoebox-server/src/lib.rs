@@ -1,6 +1,7 @@
 //! Library facade for integration tests. The binary entry point lives
 //! in `main.rs` and uses these modules directly.
 
+pub mod backup;
 pub mod ca;
 pub mod cli;
 pub mod config;

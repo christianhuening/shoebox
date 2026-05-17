@@ -1,6 +1,6 @@
 use shoebox_server::{
-    ca, cli, config, db, http, indexer, janitor, logging, mdns, mtls, revoke, secret, sqld_embed,
-    tls_server,
+    backup, ca, cli, config, db, http, indexer, janitor, logging, mdns, mtls, revoke, secret,
+    sqld_embed, tls_server,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -111,6 +111,9 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     let janitor_cache = cfg.cache_dir.clone();
     let janitor_task = tokio::spawn(janitor::run(janitor_db, janitor_cache, janitor_shutdown_rx));
 
+    // Periodic VACUUM INTO snapshot of the catalog with last-14 retention.
+    let (backup_shutdown_tx, backup_task) = spawn_backup(db.clone(), &cfg.data_dir);
+
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
@@ -154,9 +157,25 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     }
     let _ = janitor_shutdown_tx.send(());
     let _ = janitor_task.await;
+    let _ = backup_shutdown_tx.send(());
+    let _ = backup_task.await;
     broadcaster.shutdown();
     embedded_sqld.shutdown().await;
     result
+}
+
+/// Spawn the periodic catalog-backup task and return its shutdown channel
+/// alongside the spawned `JoinHandle`. Backups land in
+/// `<data_dir>/backups/`; the directory is created on first tick if it
+/// doesn't already exist.
+fn spawn_backup(
+    db: Arc<db::Db>,
+    data_dir: &std::path::Path,
+) -> (oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let (backup_shutdown_tx, backup_shutdown_rx) = oneshot::channel();
+    let backup_dir = data_dir.join("backups");
+    let backup_task = tokio::spawn(backup::run(db, backup_dir, backup_shutdown_rx));
+    (backup_shutdown_tx, backup_task)
 }
 
 /// Run the initial photo-library scan and spawn the live FS watcher.
