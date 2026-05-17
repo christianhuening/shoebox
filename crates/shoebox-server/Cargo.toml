@@ -46,6 +46,18 @@ time = { workspace = true }
 hex = { workspace = true }
 if-addrs = { workspace = true }
 parking_lot = { workspace = true }
+# Data-plane deps (Task 1 of Plan 1.3)
+notify = { workspace = true }
+blake3 = { workspace = true }
+rawler = { workspace = true }
+image = { workspace = true }
+prometheus = { workspace = true }
+tokio-tungstenite = { workspace = true }
+walkdir = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

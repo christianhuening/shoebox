@@ -52,4 +52,19 @@ x509-parser = "0.16"
 time = { version = "0.3", features = ["std", "formatting", "parsing"] }
 hex = "0.4"
 parking_lot = "0.12"
+# Data-plane deps (Task 1 of Plan 1.3)
+# NOTE: libsql-server is not published on crates.io; it is a binary-only workspace
+# crate in tursodatabase/libsql with internal path deps. Embedding sqld in-process
+# (Task 2) will be deferred to a git-dep or subprocess approach decided at Task 2 time.
+notify = "6"
+blake3 = "1"
+rawler = "0.6"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+prometheus = { version = "0.13", default-features = false }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
+walkdir = "2"
+hyper = "1"
+hyper-util = { version = "0.1", features = ["client", "tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 
