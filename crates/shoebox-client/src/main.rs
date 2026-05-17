@@ -602,18 +602,140 @@ impl App {
                 self.state.library_view.selected_grid_index = Some(index);
                 command_for_detail(&self.state)
             }
-            // Library view messages — handled in Tasks 21-23 (Plan 1.4b).
-            Message::LibraryDetailLoaded(_)
-            | Message::LibraryRatingChanged { .. }
-            | Message::LibraryRatingPersisted(_)
-            | Message::LibraryKeywordInputChanged(_)
-            | Message::LibraryKeywordSubmitted
-            | Message::LibraryKeywordAddPersisted(_)
-            | Message::LibraryKeywordRemoveClicked { .. }
-            | Message::LibraryKeywordRemovePersisted(_)
-            | Message::LibraryNewVirtualCopyClicked
-            | Message::LibraryVirtualCopyPersisted(_)
-            | Message::LibraryLockStatusTick
+            Message::LibraryDetailLoaded(Ok(detail)) => {
+                self.state.library_view.detail = Some(detail);
+                self.state.library_view.error = None;
+                command_for_lock_status(&self.state)
+            }
+            Message::LibraryDetailLoaded(Err(e)) => {
+                self.state.library_view.error = Some(format!("Detail load failed: {e}"));
+                iced::Task::none()
+            }
+
+            Message::LibraryRatingChanged { variant_id, rating } => {
+                persist_rating(&self.state, variant_id, rating)
+            }
+            Message::LibraryKeyboardRating(rating) => {
+                let Some(index) = self.state.library_view.selected_grid_index else {
+                    return iced::Task::none();
+                };
+                let Some(cell) = self.state.library_view.grid.get(index).cloned() else {
+                    return iced::Task::none();
+                };
+                persist_rating(&self.state, cell.variant_id, rating)
+            }
+            Message::LibraryRatingPersisted(Ok(())) => command_for_detail_and_grid(&self.state),
+            Message::LibraryRatingPersisted(Err(e)) => {
+                self.state.library_view.error = Some(format!("Save rating failed: {e}"));
+                iced::Task::none()
+            }
+
+            Message::LibraryKeywordInputChanged(value) => {
+                self.state.library_view.keyword_input = value;
+                iced::Task::none()
+            }
+            Message::LibraryKeywordSubmitted => {
+                let name = std::mem::take(&mut self.state.library_view.keyword_input)
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    return iced::Task::none();
+                }
+                let Some(replica) = self.state.replica.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(user_id) = self.state.config.last_active_user_id.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(detail) = self.state.library_view.detail.clone() else {
+                    return iced::Task::none();
+                };
+                iced::Task::perform(
+                    async move {
+                        let conn = replica.conn().map_err(|error| error.to_string())?;
+                        shoebox_client::library_state::add_keyword(
+                            &conn,
+                            &detail.photo_id,
+                            &user_id,
+                            &name,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                    },
+                    Message::LibraryKeywordAddPersisted,
+                )
+            }
+            Message::LibraryKeywordAddPersisted(Ok(())) => command_for_detail(&self.state),
+            Message::LibraryKeywordAddPersisted(Err(e)) => {
+                self.state.library_view.error = Some(format!("Add keyword failed: {e}"));
+                iced::Task::none()
+            }
+
+            Message::LibraryKeywordRemoveClicked { keyword_id } => {
+                let Some(replica) = self.state.replica.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(detail) = self.state.library_view.detail.clone() else {
+                    return iced::Task::none();
+                };
+                iced::Task::perform(
+                    async move {
+                        let conn = replica.conn().map_err(|error| error.to_string())?;
+                        shoebox_client::library_state::remove_keyword(
+                            &conn,
+                            &detail.photo_id,
+                            &keyword_id,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                    },
+                    Message::LibraryKeywordRemovePersisted,
+                )
+            }
+            Message::LibraryKeywordRemovePersisted(Ok(())) => command_for_detail(&self.state),
+            Message::LibraryKeywordRemovePersisted(Err(e)) => {
+                self.state.library_view.error = Some(format!("Remove keyword failed: {e}"));
+                iced::Task::none()
+            }
+
+            Message::LibraryNewVirtualCopyClicked => {
+                let Some(replica) = self.state.replica.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(user_id) = self.state.config.last_active_user_id.clone() else {
+                    return iced::Task::none();
+                };
+                let Some(detail) = self.state.library_view.detail.clone() else {
+                    return iced::Task::none();
+                };
+                iced::Task::perform(
+                    async move {
+                        let conn = replica.conn().map_err(|error| error.to_string())?;
+                        shoebox_client::library_state::create_virtual_copy(
+                            &conn,
+                            &detail.photo_id,
+                            &user_id,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                    },
+                    Message::LibraryVirtualCopyPersisted,
+                )
+            }
+            Message::LibraryVirtualCopyPersisted(Ok(_)) => {
+                let Some(folder_id) = self.state.library_view.selected_folder_id.clone() else {
+                    return iced::Task::none();
+                };
+                command_for_grid(&self.state, folder_id)
+            }
+            Message::LibraryVirtualCopyPersisted(Err(e)) => {
+                self.state.library_view.error = Some(format!("Create virtual copy failed: {e}"));
+                iced::Task::none()
+            }
+
+            // Library view messages — handled in Tasks 22-23 (Plan 1.4b).
+            Message::LibraryLockStatusTick
             | Message::LibraryLockStatusLoaded(_)
             | Message::LibraryAcquireLockClicked
             | Message::LibraryRequestTakeoverClicked
@@ -621,7 +743,6 @@ impl App {
             | Message::LibraryLockActionPersisted(_)
             | Message::LibraryLockHeartbeatTick
             | Message::LibraryKeyboardNavigation(_)
-            | Message::LibraryKeyboardRating(_)
             | Message::LibraryClearError => iced::Task::none(),
         }
     }
@@ -919,4 +1040,35 @@ fn command_for_detail(state: &AppState) -> iced::Task<Message> {
         },
         Message::LibraryDetailLoaded,
     )
+}
+
+fn persist_rating(state: &AppState, variant_id: String, rating: u8) -> iced::Task<Message> {
+    let Some(replica) = state.replica.clone() else {
+        return iced::Task::none();
+    };
+    let Some(user_id) = state.config.last_active_user_id.clone() else {
+        return iced::Task::none();
+    };
+    iced::Task::perform(
+        async move {
+            let conn = replica.conn().map_err(|error| error.to_string())?;
+            shoebox_client::library_state::upsert_rating(&conn, &variant_id, &user_id, rating)
+                .await
+                .map_err(|error| error.to_string())
+        },
+        Message::LibraryRatingPersisted,
+    )
+}
+
+fn command_for_detail_and_grid(state: &AppState) -> iced::Task<Message> {
+    let mut tasks = vec![command_for_detail(state)];
+    if let Some(folder_id) = state.library_view.selected_folder_id.clone() {
+        tasks.push(command_for_grid(state, folder_id));
+    }
+    iced::Task::batch(tasks)
+}
+
+/// Stub for Task 22 — real implementation lands when lock handlers are wired.
+fn command_for_lock_status(_state: &AppState) -> iced::Task<Message> {
+    iced::Task::none()
 }
