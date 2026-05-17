@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "shoebox_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "shoebox-server"
 path = "src/main.rs"

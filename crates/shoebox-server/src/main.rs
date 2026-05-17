@@ -1,8 +1,4 @@
-mod config;
-mod db;
-mod http;
-mod logging;
-mod mdns;
+use shoebox_server::{config, db, http, logging, mdns};
 
 use std::sync::Arc;
 use tokio::sync::oneshot;
