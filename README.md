@@ -67,6 +67,24 @@ docker run --rm -p 9000:9000 \
 A docker-compose template for typical NAS deployments (Synology, QNAP,
 TrueNAS) ships in Plan 1.5.
 
+## Running the client
+
+```bash
+cargo run -p shoebox-client
+```
+
+On first launch:
+1. The Discovery screen browses for `_shoebox._tcp.local.` servers. If nothing
+   shows up within a few seconds, use "Add manually" to enter `https://host:9000`.
+2. Paste the shared catalog secret your `shoebox-server` printed on its first
+   startup, plus the display name you want others on the catalog to see.
+3. The client fetches the server's CA, issues itself a cert via `/enroll`, and
+   stashes the cert + key in your OS keychain.
+4. Pick an existing user profile or create a new one.
+5. The Library screen shows your connection status, schema version, photo +
+   folder counts, and the active user — the polished library experience lands
+   in a follow-up plan.
+
 ## Development
 
 ```bash

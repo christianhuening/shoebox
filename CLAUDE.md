@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Plans 1.1+1.2+1.3 implemented — full server data plane (libSQL proxy, indexer, thumbnailer, dev-locks, janitor, backups, metrics, cert renewal). Plans 1.4-1.5 (client + deployment) pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plans 1.1+1.2+1.3 implemented (server data plane). Plan 1.4 implemented (desktop client foundation: Iced shell + first-run wizard + libSQL embedded replica through mTLS proxy). Plans 1.4b (demo library view) and 1.5 (deployment) pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -62,6 +62,7 @@ shoebox/
 ├── Dockerfile                               ← multi-stage server image (bundles sqld)
 ├── crates/
 │   ├── shoebox-server/                      ← server binary (data plane)
+│   ├── shoebox-client/                      ← desktop client (Iced UI, foundation)
 │   └── shoebox-common/                      ← shared types
 └── docs/
     └── superpowers/
@@ -70,8 +71,7 @@ shoebox/
         └── plans/                           ← per-sub-project implementation plans
 ```
 
-Client-side directories (`shoebox-client/`, `deploy/`, etc.) will be added
-as Plans 1.4 and 1.5 begin.
+Deployment directories (`deploy/`, etc.) will be added as Plan 1.5 begins.
 
 ## Working on this project
 
@@ -92,18 +92,28 @@ as Plans 1.4 and 1.5 begin.
   - HTTP endpoints: `/enroll`, `/renew`, `/whoami`, `/thumbs/<hash>`, `/previews/<hash>`, `/locks/:variant_id` (acquire/heartbeat/release/takeover)
   - Background tasks: janitor (lock expiry / session cleanup / orphaned-thumb GC), 6 h backups with 14-snapshot rotation, 12 h server-cert renewal check
   - Health + Prometheus `/metrics` on loopback `:9001`
+- `crates/shoebox-client` — desktop client foundation (Plan 1.4):
+  - Iced single-Application state machine: Discovery → EnterSecret → EnrollProgress (+ KeychainFailure consent) → ProfilePicker → Library
+  - First-run wizard: mDNS discovery, manual entry, `/ca-cert` bootstrap, `/enroll`, profile picker, initial replica sync
+  - Cert + key storage: OS keychain via `keyring` (Keychain / Credential Manager / Secret Service); explicit-consent mode-0600 file fallback
+  - libSQL embedded replica through the mTLS proxy; 30s background catchup ticker
+  - 12h background cert renewal task; re-issues when <30 days remain
+  - Linux + macOS + Windows from one source tree (manual smoke on each)
 - `crates/shoebox-common` — shared `Error`/`Result`, `UserId`/`MachineId`, `SCHEMA_VERSION`.
-- Run locally: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health+metrics on `127.0.0.1:9001`).
+- Run locally:
+  - Server: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health+metrics on `127.0.0.1:9001`).
+  - Client: `cargo run -p shoebox-client` (against a running `shoebox-server`).
 - Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev`. The image bundles `sqld`.
 - CI: fmt + clippy + tests + docker build on push and PR.
 - **Toolchain:** `rust-toolchain.toml` pins `stable`. MSRV in workspace `Cargo.toml` is 1.85 (libsql 0.6 transitive deps require edition2024).
 
-## Known limitations (Plan 1.3 v1)
+## Known limitations (Plan 1.3+1.4 v1)
 
-Surfaced during Plan 1.3 implementation; tracked as memory notes for future attention:
+Surfaced during Plan 1.3/1.4 implementation; tracked as memory notes for future attention:
 
 - **rawler forces JPEG decode + re-encode.** No public access to raw embedded JPEG bytes; we decode via rawler and re-encode at quality 90. Net cost: one extra JPEG round-trip per indexed RAW. See memory: `project_rawler_api_constraints.md`.
 - **Two writers to `catalog.db`.** The migration runner (`Db`) and the spawned `sqld` subprocess both hold the same SQLite file. SQLite WAL handles this badly across processes; the v1 risk is accepted. Resolution: route all server-side writes through the loopback sqld connection. See memory: `project_libsql_server_unpublished.md`.
+- **Client Library screen is a placeholder.** Plan 1.4's Library view shows connection status, schema version, photo/folder counts, and active user — no grid, no filmstrip, no thumbnails. The polished library UI lands in Plan 1.4b (demo library view) and the full browser in sub-project #3.
 
 ## Memory pointers
 
