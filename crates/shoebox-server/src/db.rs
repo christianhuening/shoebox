@@ -69,6 +69,150 @@ impl Db {
             .await?;
         Ok(rows.next().await?.is_some())
     }
+
+    /// Try to acquire the develop lock on `variant_id` for `session_id` /
+    /// `user_id` with a TTL of `ttl_ms` milliseconds.
+    ///
+    /// Returns `true` if the lock was newly acquired, `false` if another
+    /// session already holds it (insert is a no-op via `ON CONFLICT DO
+    /// NOTHING`).
+    ///
+    /// # Errors
+    /// Returns an error if the database connection or insert fails.
+    pub async fn lock_acquire(
+        &self,
+        variant_id: &str,
+        session_id: &str,
+        user_id: &str,
+        ttl_ms: i64,
+    ) -> anyhow::Result<bool> {
+        let conn = self.connect()?;
+        let acquired_at = now_ms();
+        let expires_at = acquired_at + ttl_ms;
+        let rows_affected = conn
+            .execute(
+                "INSERT INTO develop_locks \
+                 (variant_id, session_id, user_id, acquired_at, expires_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(variant_id) DO NOTHING",
+                (
+                    variant_id.to_string(),
+                    session_id.to_string(),
+                    user_id.to_string(),
+                    acquired_at,
+                    expires_at,
+                ),
+            )
+            .await?;
+        Ok(rows_affected > 0)
+    }
+
+    /// Extend the develop lock on `variant_id` held by `session_id` by
+    /// `ttl_ms` milliseconds from now. Returns `true` if a matching lock row
+    /// was found and updated, `false` otherwise (lock expired, never held,
+    /// or held by a different session).
+    ///
+    /// # Errors
+    /// Returns an error if the database connection or update fails.
+    pub async fn lock_heartbeat(
+        &self,
+        variant_id: &str,
+        session_id: &str,
+        ttl_ms: i64,
+    ) -> anyhow::Result<bool> {
+        let conn = self.connect()?;
+        let expires_at = now_ms() + ttl_ms;
+        let rows_affected = conn
+            .execute(
+                "UPDATE develop_locks SET expires_at = ?1 \
+                 WHERE variant_id = ?2 AND session_id = ?3",
+                (expires_at, variant_id.to_string(), session_id.to_string()),
+            )
+            .await?;
+        Ok(rows_affected > 0)
+    }
+
+    /// Release the develop lock on `variant_id` if it is held by
+    /// `session_id`. Returns `true` if a row was deleted, `false` if no
+    /// matching lock existed.
+    ///
+    /// # Errors
+    /// Returns an error if the database connection or delete fails.
+    pub async fn lock_release(&self, variant_id: &str, session_id: &str) -> anyhow::Result<bool> {
+        let conn = self.connect()?;
+        let rows_affected = conn
+            .execute(
+                "DELETE FROM develop_locks WHERE variant_id = ?1 AND session_id = ?2",
+                (variant_id.to_string(), session_id.to_string()),
+            )
+            .await?;
+        Ok(rows_affected > 0)
+    }
+
+    /// Record a takeover request on the develop lock for `variant_id` by
+    /// `requesting_user_id`. The update is conditional on no takeover
+    /// already being pending. Returns `true` if a takeover was newly
+    /// recorded, `false` if no lock exists or a takeover was already
+    /// pending.
+    ///
+    /// # Errors
+    /// Returns an error if the database connection or update fails.
+    pub async fn lock_request_takeover(
+        &self,
+        variant_id: &str,
+        requesting_user_id: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = self.connect()?;
+        let requested_at = now_ms();
+        let rows_affected = conn
+            .execute(
+                "UPDATE develop_locks \
+                 SET takeover_requested_by = ?1, takeover_requested_at = ?2 \
+                 WHERE variant_id = ?3 AND takeover_requested_by IS NULL",
+                (
+                    requesting_user_id.to_string(),
+                    requested_at,
+                    variant_id.to_string(),
+                ),
+            )
+            .await?;
+        Ok(rows_affected > 0)
+    }
+
+    /// Delete all develop-lock rows whose `expires_at` is in the past.
+    /// Returns the number of rows removed.
+    ///
+    /// # Errors
+    /// Returns an error if the database connection or delete fails.
+    pub async fn lock_release_expired(&self) -> anyhow::Result<usize> {
+        let conn = self.connect()?;
+        let now = now_ms();
+        let rows_affected = conn
+            .execute("DELETE FROM develop_locks WHERE expires_at < ?1", [now])
+            .await?;
+        Ok(usize::try_from(rows_affected).unwrap_or(usize::MAX))
+    }
+
+    /// Return the `user_id` of the current develop-lock holder for
+    /// `variant_id`, or `None` if no lock exists.
+    ///
+    /// # Errors
+    /// Returns an error if the database connection, query, or column
+    /// extraction fails.
+    pub async fn lock_holder(&self, variant_id: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.connect()?;
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM develop_locks WHERE variant_id = ?1",
+                [variant_id],
+            )
+            .await?;
+        let holder = match rows.next().await? {
+            Some(row) => Some(row.get::<String>(0)?),
+            None => None,
+        };
+        Ok(holder)
+    }
 }
 
 async fn apply_migrations(conn: &Connection) -> Result<()> {
@@ -336,5 +480,60 @@ mod tests {
         db.insert_revoked_cert("abc123", Some("test"), None)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn lock_lifecycle_roundtrips() {
+        let tmp = TempDir::new().unwrap();
+        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        // Set up FK chain: users, session, photo, variant.
+        let setup_timestamp = 1_000_000_i64;
+        conn.execute(
+            "INSERT INTO users (id, display_name, created_at) VALUES ('u1', 'Alice', ?1)",
+            [setup_timestamp],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO users (id, display_name, created_at) VALUES ('u2', 'Bob', ?1)",
+            [setup_timestamp],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, user_id, client_machine_id, established_at, last_active_at) \
+             VALUES ('s1', 'u1', 'm1', ?1, ?1)",
+            [setup_timestamp],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO photos (id, file_size, file_format, imported_at) \
+             VALUES ('h1', 100, 'PEF', ?1)",
+            [setup_timestamp],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO variants (id, photo_id, variant_index, created_by, created_at, \
+             develop_settings_json, develop_settings_version, develop_updated_at, develop_updated_by) \
+             VALUES ('v1', 'h1', 0, 'u1', ?1, '{}', 1, ?1, 'u1')",
+            [setup_timestamp],
+        )
+        .await
+        .unwrap();
+
+        assert!(db.lock_acquire("v1", "s1", "u1", 60_000).await.unwrap());
+        // Re-acquire by same session: false (already held).
+        assert!(!db.lock_acquire("v1", "s1", "u1", 60_000).await.unwrap());
+        assert!(db.lock_heartbeat("v1", "s1", 120_000).await.unwrap());
+        assert!(db.lock_request_takeover("v1", "u2").await.unwrap());
+        // Second takeover by same user: false (already set).
+        assert!(!db.lock_request_takeover("v1", "u2").await.unwrap());
+        assert!(db.lock_release("v1", "s1").await.unwrap());
+        // After release, holder is None.
+        assert_eq!(db.lock_holder("v1").await.unwrap(), None);
     }
 }
