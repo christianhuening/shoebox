@@ -550,6 +550,107 @@ pub async fn create_virtual_copy(
     Ok(new_id)
 }
 
+/// Outcome distinguishes "took it" from "someone else has it" so the
+/// caller can route 409 to a status refresh instead of an error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockAcquireOutcome {
+    Acquired,
+    AlreadyHeld,
+}
+
+pub async fn http_acquire_lock(
+    client: &reqwest::Client,
+    server_base_url: &str,
+    variant_id: &str,
+) -> Result<LockAcquireOutcome> {
+    let url = format!(
+        "{}/locks/{variant_id}",
+        server_base_url.trim_end_matches('/')
+    );
+    let response = client
+        .post(&url)
+        .send()
+        .await
+        .context("POST /locks/:id")?;
+    match response.status().as_u16() {
+        200 => Ok(LockAcquireOutcome::Acquired),
+        409 => Ok(LockAcquireOutcome::AlreadyHeld),
+        status => Err(anyhow::anyhow!("acquire returned status {status}")),
+    }
+}
+
+pub async fn http_heartbeat_lock(
+    client: &reqwest::Client,
+    server_base_url: &str,
+    variant_id: &str,
+) -> Result<()> {
+    let url = format!(
+        "{}/locks/{variant_id}",
+        server_base_url.trim_end_matches('/')
+    );
+    let response = client
+        .put(&url)
+        .send()
+        .await
+        .context("PUT /locks/:id")?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "heartbeat returned status {}",
+            response.status()
+        ))
+    }
+}
+
+pub async fn http_release_lock(
+    client: &reqwest::Client,
+    server_base_url: &str,
+    variant_id: &str,
+) -> Result<()> {
+    let url = format!(
+        "{}/locks/{variant_id}",
+        server_base_url.trim_end_matches('/')
+    );
+    let response = client
+        .delete(&url)
+        .send()
+        .await
+        .context("DELETE /locks/:id")?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "release returned status {}",
+            response.status()
+        ))
+    }
+}
+
+pub async fn http_request_takeover(
+    client: &reqwest::Client,
+    server_base_url: &str,
+    variant_id: &str,
+) -> Result<()> {
+    let url = format!(
+        "{}/locks/{variant_id}/takeover",
+        server_base_url.trim_end_matches('/')
+    );
+    let response = client
+        .post(&url)
+        .send()
+        .await
+        .context("POST /locks/:id/takeover")?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "takeover returned status {}",
+            response.status()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
