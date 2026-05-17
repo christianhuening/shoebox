@@ -70,7 +70,7 @@ http-body-util = "0.1"
 bytes = "1"
 futures-util = "0.3"
 # Desktop client deps (Plan 1.4 Task 1)
-iced = { version = "0.13", default-features = false, features = ["wgpu", "tokio", "advanced"] }
+iced = { version = "0.13", default-features = false, features = ["wgpu", "tokio", "advanced", "image"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-async-persistent", "crypto-rust", "tokio"] }
 lru = "0.12"
 directories = "5"
