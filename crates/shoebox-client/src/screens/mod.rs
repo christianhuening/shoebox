@@ -5,13 +5,16 @@ pub mod discovery;
 pub mod enroll_progress;
 pub mod enter_secret;
 pub mod library;
+pub mod library_view;
 pub mod profile_picker;
 
 use std::sync::Arc;
 
 use crate::discovery::DiscoveredServer;
 use crate::enrollment::EnrollResult;
+use crate::library_state::{DetailLoaded, FolderRow, GridCell, LockStatus, NavigationDirection};
 use crate::replica::Replica;
+use crate::thumb_cache::CachedResult;
 
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::large_enum_variant)]
@@ -103,6 +106,44 @@ pub enum Message {
         users: Vec<UserRow>,
     },
     CertRenewalTick,
+
+    // Library view
+    LibraryFolderTreeLoaded(Result<Vec<FolderRow>, String>),
+    LibraryFolderSelected(String),
+    LibraryGridLoaded {
+        folder_id: String,
+        cells: Result<Vec<GridCell>, String>,
+    },
+    LibraryThumbReady {
+        hash: String,
+        result: CachedResult,
+    },
+    LibraryGridCellSelected(usize),
+    LibraryDetailLoaded(Result<DetailLoaded, String>),
+    LibraryRatingChanged {
+        variant_id: String,
+        rating: u8,
+    },
+    LibraryRatingPersisted(Result<(), String>),
+    LibraryKeywordInputChanged(String),
+    LibraryKeywordSubmitted,
+    LibraryKeywordAddPersisted(Result<(), String>),
+    LibraryKeywordRemoveClicked {
+        keyword_id: String,
+    },
+    LibraryKeywordRemovePersisted(Result<(), String>),
+    LibraryNewVirtualCopyClicked,
+    LibraryVirtualCopyPersisted(Result<String, String>),
+    LibraryLockStatusTick,
+    LibraryLockStatusLoaded(Result<LockStatus, String>),
+    LibraryAcquireLockClicked,
+    LibraryRequestTakeoverClicked,
+    LibraryReleaseLockClicked,
+    LibraryLockActionPersisted(Result<(), String>),
+    LibraryLockHeartbeatTick,
+    LibraryKeyboardNavigation(NavigationDirection),
+    LibraryKeyboardRating(u8),
+    LibraryClearError,
 
     // Generic
     ClearError,

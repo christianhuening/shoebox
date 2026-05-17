@@ -79,6 +79,7 @@ pub struct LibraryViewState {
     pub lock_status: LockStatus,
     pub error: Option<String>,
     pub cells_per_row: usize,
+    pub keyword_input: String,
 }
 
 #[allow(dead_code)]

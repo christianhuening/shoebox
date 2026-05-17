@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::ClientConfig;
+use crate::library_state::LibraryViewState;
 use crate::replica::Replica;
+use crate::thumb_cache::ThumbCache;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionStatus {
@@ -37,6 +39,11 @@ pub struct AppState {
     /// In-flight error to display in the current screen's inline area.
     /// Set by `update()` handlers; cleared on next user action.
     pub last_error: Option<String>,
+    /// View state for the demo library screen. Reset on logout.
+    pub library_view: LibraryViewState,
+    /// Created when the replica opens; shared by the photo grid and detail
+    /// panel via clones (it's internally `Arc<Mutex<…>>`).
+    pub thumb_cache: Option<ThumbCache>,
 }
 
 impl AppState {
@@ -53,6 +60,8 @@ impl AppState {
             connection_status: ConnectionStatus::Disconnected,
             file_storage_warning: FileStorageWarning(false),
             last_error: None,
+            library_view: LibraryViewState::default(),
+            thumb_cache: None,
         }
     }
 

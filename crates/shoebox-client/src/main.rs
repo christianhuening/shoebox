@@ -531,6 +531,32 @@ impl App {
                 iced::Task::none()
             }
             Message::Shutdown => iced::Task::none(),
+            // Library view messages — handled in Tasks 19-23 (Plan 1.4b).
+            Message::LibraryFolderTreeLoaded(_)
+            | Message::LibraryFolderSelected(_)
+            | Message::LibraryGridLoaded { .. }
+            | Message::LibraryThumbReady { .. }
+            | Message::LibraryGridCellSelected(_)
+            | Message::LibraryDetailLoaded(_)
+            | Message::LibraryRatingChanged { .. }
+            | Message::LibraryRatingPersisted(_)
+            | Message::LibraryKeywordInputChanged(_)
+            | Message::LibraryKeywordSubmitted
+            | Message::LibraryKeywordAddPersisted(_)
+            | Message::LibraryKeywordRemoveClicked { .. }
+            | Message::LibraryKeywordRemovePersisted(_)
+            | Message::LibraryNewVirtualCopyClicked
+            | Message::LibraryVirtualCopyPersisted(_)
+            | Message::LibraryLockStatusTick
+            | Message::LibraryLockStatusLoaded(_)
+            | Message::LibraryAcquireLockClicked
+            | Message::LibraryRequestTakeoverClicked
+            | Message::LibraryReleaseLockClicked
+            | Message::LibraryLockActionPersisted(_)
+            | Message::LibraryLockHeartbeatTick
+            | Message::LibraryKeyboardNavigation(_)
+            | Message::LibraryKeyboardRating(_)
+            | Message::LibraryClearError => iced::Task::none(),
         }
     }
 
