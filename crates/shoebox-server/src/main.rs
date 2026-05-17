@@ -1,5 +1,6 @@
 use shoebox_server::{
-    ca, cli, config, db, http, indexer, logging, mdns, mtls, revoke, secret, sqld_embed, tls_server,
+    ca, cli, config, db, http, indexer, janitor, logging, mdns, mtls, revoke, secret, sqld_embed,
+    tls_server,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -102,6 +103,14 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     let (mut indexer_shutdown_tx, mut indexer_task) =
         start_indexer(db.clone(), &cfg.photos_dir, &cfg.cache_dir).await?;
 
+    // Periodic cleanup: stale lock expiry, abandoned session cleanup,
+    // orphaned thumbnail GC. Always runs (unlike the indexer, which is
+    // gated on `photos_dir` existing).
+    let (janitor_shutdown_tx, janitor_shutdown_rx) = oneshot::channel();
+    let janitor_db = db.clone();
+    let janitor_cache = cfg.cache_dir.clone();
+    let janitor_task = tokio::spawn(janitor::run(janitor_db, janitor_cache, janitor_shutdown_rx));
+
     let state = http::AppState {
         db,
         schema_version: shoebox_common::SCHEMA_VERSION,
@@ -143,6 +152,8 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     if let Some(task) = indexer_task.take() {
         let _ = task.await;
     }
+    let _ = janitor_shutdown_tx.send(());
+    let _ = janitor_task.await;
     broadcaster.shutdown();
     embedded_sqld.shutdown().await;
     result
