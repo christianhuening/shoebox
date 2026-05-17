@@ -20,6 +20,7 @@ workspace = true
 [dependencies]
 shoebox-common = { path = "../shoebox-common" }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
