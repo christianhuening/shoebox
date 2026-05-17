@@ -12,3 +12,4 @@ workspace = true
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
+hex = { workspace = true }
