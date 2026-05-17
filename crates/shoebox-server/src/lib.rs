@@ -14,4 +14,5 @@ pub mod mtls;
 pub mod revoke;
 pub mod secret;
 pub mod tls_server;
+pub mod sqld_embed;
 pub mod whoami;
