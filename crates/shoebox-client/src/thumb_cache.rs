@@ -239,4 +239,16 @@ mod tests {
         assert!(cache.get("hash1").await.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn cold_memory_hot_disk_does_not_hit_server() {
+        let tmp = TempDir::new().unwrap();
+        let (url, counter) = spawn_counting_server(tiny_jpeg()).await;
+        // Pre-seed the disk with the JPEG.
+        std::fs::write(tmp.path().join("hash1.jpg"), tiny_jpeg()).unwrap();
+        let cache =
+            ThumbCache::new(reqwest::Client::new(), url, tmp.path().to_path_buf()).unwrap();
+        assert!(cache.get("hash1").await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
 }
