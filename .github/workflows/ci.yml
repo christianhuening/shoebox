@@ -31,3 +31,40 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Build image (no push)
         run: docker build -t shoebox-server:ci .
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t shoebox-server:smoke .
+      - name: Prep env
+        working-directory: deploy/compose
+        run: |
+          cp .env.example .env
+          echo "SHOEBOX_SECRET=$(openssl rand -base64 24)" >> .env
+          PHOTOS_DIR=$(mktemp -d)
+          echo "SHOEBOX_PHOTOS_DIR=${PHOTOS_DIR}" >> .env
+          # Bind health server to all interfaces so the host curl can reach it.
+          echo "SHOEBOX_HEALTH_BIND_ADDR=0.0.0.0:9001" >> .env
+          # Pin the locally-built image so we don't pull from ghcr.
+          sed -i 's|image: ghcr.io/CHANGE-ME-OWNER/shoebox-server:v0.1.0|image: shoebox-server:smoke|' docker-compose.yml
+      - name: Compose up
+        working-directory: deploy/compose
+        run: docker compose up -d
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9001/health >/dev/null; then
+              echo "healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "server never became healthy"
+          docker compose -f deploy/compose/docker-compose.yml logs
+          exit 1
+      - name: Compose down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose down -v
