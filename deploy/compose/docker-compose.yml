@@ -1,0 +1,25 @@
+# shoebox-server single-node compose deployment.
+# See deploy/compose/README.md for the 4-step setup.
+
+services:
+  shoebox-server:
+    image: ghcr.io/CHANGE-ME-OWNER/shoebox-server:v0.1.0
+    container_name: shoebox-server
+    restart: unless-stopped
+    ports:
+      - "9000:9000"                  # mTLS — exposed to LAN
+      - "127.0.0.1:9001:9001"        # health + metrics — loopback only
+    volumes:
+      - shoebox-data:/var/lib/shoebox
+      - shoebox-cache:/shoebox-cache
+      - ${SHOEBOX_PHOTOS_DIR:?set SHOEBOX_PHOTOS_DIR in .env}:/photos
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9001/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  shoebox-data:
+  shoebox-cache:
