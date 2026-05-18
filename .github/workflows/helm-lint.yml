@@ -1,0 +1,33 @@
+name: helm-lint
+on:
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - ".github/workflows/helm-lint.yml"
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.14.0"
+      - name: helm lint
+        run: helm lint deploy/helm/shoebox --set storage.photos.hostPath=/srv/photos
+      - name: helm template (defaults) — diff against golden
+        run: |
+          # SHOEBOX_SECRET is redacted in the golden file (randAlphaNum
+          # regenerates per render); apply the same filter to the live
+          # render so the diff catches structural changes only.
+          helm template release deploy/helm/shoebox \
+            --set storage.photos.hostPath=/srv/photos \
+            | sed -E 's|^(  SHOEBOX_SECRET: ).*$|\1"<REDACTED>"|' \
+            > /tmp/defaults.yaml
+          diff -u deploy/helm/shoebox/ci/golden-defaults.yaml /tmp/defaults.yaml
+      - name: helm template (cache-on) — diff against golden
+        run: |
+          helm template release deploy/helm/shoebox \
+            -f deploy/helm/shoebox/ci/values-cache-on.yaml \
+            | sed -E 's|^(  SHOEBOX_SECRET: ).*$|\1"<REDACTED>"|' \
+            > /tmp/cache-on.yaml
+          diff -u deploy/helm/shoebox/ci/golden-cache-on.yaml /tmp/cache-on.yaml
