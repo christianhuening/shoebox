@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "shoebox.fullname" . }}
+  labels:
+    {{- include "shoebox.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: mtls
+      port: {{ .Values.service.ports.mtls }}
+      targetPort: mtls
+      protocol: TCP
+    - name: health
+      port: {{ .Values.service.ports.health }}
+      targetPort: health
+      protocol: TCP
+  selector:
+    {{- include "shoebox.selectorLabels" . | nindent 4 }}
