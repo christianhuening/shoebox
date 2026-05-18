@@ -28,25 +28,20 @@ pub fn view<'a>(
         text("Fetching server CA…").into()
     };
 
+    let submit_message = Message::SecretSubmitted {
+        secret: secret_draft.to_string(),
+        display_name: display_name_draft.to_string(),
+    };
     let form = column![
         text("Enter the shared catalog secret your admin gave you:"),
-        text_input("shared secret", secret_draft).on_input(|updated_secret| {
-            Message::SecretSubmitted {
-                secret: updated_secret,
-                display_name: display_name_draft.to_string(),
-            }
-        }),
+        text_input("shared secret", secret_draft)
+            .on_input(Message::SecretDraftChanged)
+            .on_submit(submit_message.clone()),
         text("Your display name (shown to others on the same catalog):"),
-        text_input("display name", display_name_draft).on_input(|updated_name| {
-            Message::SecretSubmitted {
-                secret: secret_draft.to_string(),
-                display_name: updated_name,
-            }
-        }),
-        button(text("Enroll")).on_press(Message::SecretSubmitted {
-            secret: secret_draft.to_string(),
-            display_name: display_name_draft.to_string(),
-        }),
+        text_input("display name", display_name_draft)
+            .on_input(Message::DisplayNameDraftChanged)
+            .on_submit(submit_message.clone()),
+        button(text("Enroll")).on_press(submit_message),
     ]
     .spacing(8);
 

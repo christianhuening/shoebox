@@ -39,24 +39,19 @@ pub fn view<'a>(
         list_column.into()
     };
 
+    let submit_message = Message::ManualUrlSubmitted {
+        display_name: manual_name_draft.to_string(),
+        url: manual_url_draft.to_string(),
+    };
     let manual_form = column![
         text("Or add manually:").size(18),
-        text_input("Display name", manual_name_draft).on_input(|new_name| {
-            Message::ManualUrlSubmitted {
-                display_name: new_name,
-                url: manual_url_draft.to_string(),
-            }
-        }),
-        text_input("https://host:9000", manual_url_draft).on_input(|new_url| {
-            Message::ManualUrlSubmitted {
-                display_name: manual_name_draft.to_string(),
-                url: new_url,
-            }
-        }),
-        button(text("Add this server")).on_press(Message::ManualUrlSubmitted {
-            display_name: manual_name_draft.to_string(),
-            url: manual_url_draft.to_string(),
-        }),
+        text_input("Display name", manual_name_draft)
+            .on_input(Message::ManualNameDraftChanged)
+            .on_submit(submit_message.clone()),
+        text_input("https://host:9000", manual_url_draft)
+            .on_input(Message::ManualUrlDraftChanged)
+            .on_submit(submit_message.clone()),
+        button(text("Add this server")).on_press(submit_message),
     ]
     .spacing(6);
 

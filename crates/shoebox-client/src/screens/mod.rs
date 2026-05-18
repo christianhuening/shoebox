@@ -62,6 +62,14 @@ pub enum Message {
     ServerDiscovered(DiscoveredServer),
     DiscoveryError(String),
     DiscoveryRetry,
+    /// Fired on every keystroke in the manual-URL "display name" field.
+    /// Updates the draft only; does NOT add a server to the list.
+    ManualNameDraftChanged(String),
+    /// Fired on every keystroke in the manual-URL "url" field. Updates
+    /// the draft only; does NOT add a server to the list.
+    ManualUrlDraftChanged(String),
+    /// Fired only when the user clicks the "Add this server" button (or
+    /// presses Enter in the URL field). Adds the server to the list.
     ManualUrlSubmitted {
         display_name: String,
         url: String,
@@ -70,6 +78,14 @@ pub enum Message {
 
     // EnterSecret + ca-cert bootstrap
     CaCertFetched(Result<String, String>),
+    /// Fired on every keystroke in the secret field. Updates the draft
+    /// only; does NOT trigger enrollment.
+    SecretDraftChanged(String),
+    /// Fired on every keystroke in the display-name field. Updates the
+    /// draft only; does NOT trigger enrollment.
+    DisplayNameDraftChanged(String),
+    /// Fired only on explicit submit (Enroll button or Enter in either
+    /// field). Triggers `enroll`.
     SecretSubmitted {
         secret: String,
         display_name: String,

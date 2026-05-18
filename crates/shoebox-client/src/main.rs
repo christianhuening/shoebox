@@ -217,6 +217,14 @@ impl App {
                 }
                 iced::Task::none()
             }
+            Message::ManualNameDraftChanged(new_name) => {
+                self.manual_name_draft = new_name;
+                iced::Task::none()
+            }
+            Message::ManualUrlDraftChanged(new_url) => {
+                self.manual_url_draft = new_url;
+                iced::Task::none()
+            }
             Message::ManualUrlSubmitted { display_name, url } => {
                 self.manual_name_draft.clone_from(&display_name);
                 self.manual_url_draft.clone_from(&url);
@@ -251,6 +259,14 @@ impl App {
             }
             Message::CaCertFetched(Err(ca_err)) => {
                 self.state.last_error = Some(format!("fetching server CA: {ca_err}"));
+                iced::Task::none()
+            }
+            Message::SecretDraftChanged(updated_secret) => {
+                self.secret_draft = updated_secret;
+                iced::Task::none()
+            }
+            Message::DisplayNameDraftChanged(updated_name) => {
+                self.display_name_draft = updated_name;
                 iced::Task::none()
             }
             Message::SecretSubmitted {
