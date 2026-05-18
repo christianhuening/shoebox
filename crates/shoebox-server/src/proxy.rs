@@ -146,6 +146,36 @@ async fn forward_http(
         request_headers.remove("te");
     }
 
+    if is_grpc {
+        // libsql clients (0.6 through at least 0.9.30) send their bearer
+        // token in `x-authorization`. sqld's WriteProxy gRPC service
+        // ignores that header and instead expects `x-proxy-authorization`
+        // to contain a JSON-serialized `libsql_server::auth::Authenticated`
+        // enum (sqld's intra-cluster auth handoff format — designed for
+        // replica nodes forwarding an already-authenticated client
+        // identity to the primary). When the header is missing, sqld
+        // returns `"x-proxy-authorization not set"`; when it's any non-JSON
+        // string (e.g. `Bearer <token>`), sqld's `serde_json::from_str
+        // (...).unwrap()` panics inside the request handler and the gRPC
+        // stream dies with a cryptic `"Invalid header bit X expected 0 or
+        // 1"` h2 error.
+        //
+        // The shoebox-server proxy already authenticated the caller via
+        // mTLS (the `ClientIdentity` extractor ran before this handler
+        // was entered) and `sqld` is bound to loopback inside the same
+        // process tree, so vouching for the request with `FullAccess`
+        // (sqld's no-permission-check variant) is honest: we've already
+        // verified the client cert chains to our internal CA.
+        //
+        // Tracked upstream as tursodatabase/go-libsql#42 (OPEN since 2024)
+        // and #52; unlikely to be fixed since Turso has deprecated this
+        // codepath in favour of "Turso Sync".
+        request_headers.insert(
+            "x-proxy-authorization",
+            axum::http::HeaderValue::from_static("\"FullAccess\""),
+        );
+    }
+
     match client.request(req).await {
         Ok(upstream_response) => upstream_response.into_response(),
         Err(forward_error) => {
