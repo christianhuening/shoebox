@@ -40,10 +40,7 @@ libsql = { version = "0.9", default-features = false, features = ["core", "repli
 mdns-sd = "0.19"
 include_dir = "0.7"
 hostname = "0.4"
-# rcgen 0.13 → 0.14 deferred: 0.14 reworked the signing API (new Issuer
-# struct, CertificateParams::from_ca_cert_pem moved to Issuer). Stay on
-# 0.13 until a focused migration.
-rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring", "x509-parser"] }
 if-addrs = "0.15"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustls-pemfile = "2"

@@ -155,7 +155,8 @@ mod tests {
     /// The serial is set explicitly so tests can force particular bit patterns
     /// without relying on rcgen's random generation.
     fn issue_test_cert_der_with_serial(serial_bytes: &[u8]) -> Vec<u8> {
-        // Build a self-signed one-off CA.
+        // Build a self-signed one-off CA, then wrap it in an `Issuer` for
+        // the leaf-signing step (rcgen 0.14 signed_by takes &Issuer).
         let ca_kp = KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -165,7 +166,7 @@ mod tests {
             dn.push(DnType::CommonName, "test-ca");
             dn
         };
-        let ca_cert = ca_params.self_signed(&ca_kp).unwrap();
+        let ca_issuer = rcgen::Issuer::new(ca_params, ca_kp);
 
         // Build a leaf cert with the supplied serial.
         let leaf_kp = KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
@@ -177,7 +178,7 @@ mod tests {
             dn.push(DnType::OrganizationalUnitName, "test-machine");
             dn
         };
-        let leaf_cert = leaf_params.signed_by(&leaf_kp, &ca_cert, &ca_kp).unwrap();
+        let leaf_cert = leaf_params.signed_by(&leaf_kp, &ca_issuer).unwrap();
         leaf_cert.der().to_vec()
     }
 

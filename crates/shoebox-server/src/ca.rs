@@ -10,8 +10,8 @@
 
 use anyhow::{anyhow, Context, Result};
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType,
-    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, PublicKeyData,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, PublicKeyData,
 };
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -27,16 +27,14 @@ pub const NOT_BEFORE_BACKDATE_SECS: i64 = 300; // 5 minutes
 
 /// The live root CA state held in memory.
 ///
-/// `root_cert` is kept solely so it can be passed as the `issuer` argument
-/// to `CertificateParams::signed_by`. Its DER is NOT the persisted cert when
-/// loaded from disk (a fresh self-signed cert is produced from the loaded
-/// params to satisfy the API); the persisted cert is tracked via
-/// `root_cert_pem` and `root_cert_der`.
+/// `root_issuer` owns the CA's signing key and the parameters needed when
+/// signing leaf certs (rcgen 0.14 collapsed the previous
+/// `signed_by(kp, &cert, &kp)` signature into `signed_by(&kp, &issuer)`).
+/// The persisted PEM/DER bytes of the CA cert are kept alongside so callers
+/// (the mTLS server config builder, /ca-cert handler, etc.) can read them
+/// without round-tripping through `Issuer`.
 pub struct Ca {
-    pub root_keypair: KeyPair,
-    /// A `Certificate` object whose params match the root CA, used as the
-    /// issuer reference when signing leaf certs.
-    root_cert: Certificate,
+    root_issuer: Issuer<'static, KeyPair>,
     pub root_cert_der: Vec<u8>,
     pub root_cert_pem: String,
     pub data_dir: PathBuf,
@@ -68,21 +66,14 @@ impl Ca {
             let root_keypair =
                 KeyPair::from_pem(&key_pem).map_err(|e| anyhow!("parsing CA key PEM: {e}"))?;
 
-            // Parse the persisted cert's params so we can reconstruct an issuer
-            // Certificate. The reconstructed cert may have a new serial but its
-            // DN matches — that is all rcgen needs when we call signed_by().
-            let loaded_params = CertificateParams::from_ca_cert_pem(&cert_pem)
-                .map_err(|e| anyhow!("parsing CA cert PEM: {e}"))?;
-            let root_cert = loaded_params
-                .self_signed(&root_keypair)
-                .map_err(|e| anyhow!("reconstructing issuer certificate: {e}"))?;
+            let root_issuer = Issuer::from_ca_cert_pem(&cert_pem, root_keypair)
+                .map_err(|e| anyhow!("building Issuer from CA cert PEM: {e}"))?;
 
             let cert_der = pem_to_der(&cert_pem)
                 .ok_or_else(|| anyhow!("CA cert PEM has no CERTIFICATE block"))?;
 
             Ok(Self {
-                root_keypair,
-                root_cert,
+                root_issuer,
                 root_cert_der: cert_der,
                 root_cert_pem: cert_pem,
                 data_dir: data_dir.to_path_buf(),
@@ -105,6 +96,7 @@ impl Ca {
             params.not_before = now - Duration::seconds(NOT_BEFORE_BACKDATE_SECS);
             params.not_after = now + Duration::days(ROOT_CA_VALIDITY_DAYS);
 
+            // Self-sign once to capture the persisted PEM + DER bytes.
             let root_cert = params
                 .self_signed(&root_keypair)
                 .map_err(|e| anyhow!("self-signing CA cert: {e}"))?;
@@ -119,9 +111,13 @@ impl Ca {
                 .with_context(|| format!("writing {}", key_path.display()))?;
             set_owner_only(&key_path)?;
 
+            // Move the params + key into the Issuer that signs all future
+            // leaf certs. `params` already carries everything signed_by()
+            // needs (DN, key usages, etc.).
+            let root_issuer = Issuer::new(params, root_keypair);
+
             Ok(Self {
-                root_keypair,
-                root_cert,
+                root_issuer,
                 root_cert_der,
                 root_cert_pem,
                 data_dir: data_dir.to_path_buf(),
@@ -152,10 +148,10 @@ impl Ca {
         let not_after = now + Duration::days(SERVER_CERT_VALIDITY_DAYS);
         params.not_after = not_after;
 
-        // rcgen 0.13 API: signed_by(self, public_key, issuer: &Certificate, issuer_key)
-        // KeyPair implements PublicKeyData, so we pass &kp as the public key.
+        // rcgen 0.14 API: signed_by(&self_kp, &issuer). KeyPair implements
+        // PublicKeyData, so &kp doubles as the public-key reference.
         let cert = params
-            .signed_by(&kp, &self.root_cert, &self.root_keypair)
+            .signed_by(&kp, &self.root_issuer)
             .map_err(|e| anyhow!("signing server cert: {e}"))?;
 
         Ok((
@@ -200,7 +196,7 @@ impl Ca {
 
         // SubjectPublicKeyInfo implements PublicKeyData — use signed_by directly.
         let cert = params
-            .signed_by(public_key, &self.root_cert, &self.root_keypair)
+            .signed_by(public_key, &self.root_issuer)
             .map_err(|e| anyhow!("signing client cert: {e}"))?;
 
         Ok(IssuedCert {

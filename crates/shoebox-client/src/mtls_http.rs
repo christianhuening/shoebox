@@ -109,9 +109,9 @@ mod tests {
     }
 
     fn fresh_cert_pair() -> (String, String) {
-        let CertifiedKey { cert, key_pair } =
+        let CertifiedKey { cert, signing_key } =
             generate_simple_self_signed(vec!["test.local".to_string()]).unwrap();
-        (cert.pem(), key_pair.serialize_pem())
+        (cert.pem(), signing_key.serialize_pem())
     }
 
     #[test]
