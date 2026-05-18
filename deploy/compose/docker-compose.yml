@@ -13,6 +13,13 @@ services:
       - shoebox-data:/var/lib/shoebox
       - shoebox-cache:/shoebox-cache
       - ${SHOEBOX_PHOTOS_DIR:?set SHOEBOX_PHOTOS_DIR in .env}:/photos
+    environment:
+      # Server defaults health bind to 127.0.0.1:9001 (container-loopback);
+      # override so the host-side port mapping actually reaches it. The
+      # outer `127.0.0.1:9001:...` mapping still restricts host exposure
+      # to loopback, so this only opens the metrics port to the host, not
+      # to the LAN.
+      SHOEBOX_HEALTH_BIND_ADDR: "0.0.0.0:9001"
     env_file: .env
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9001/health"]
