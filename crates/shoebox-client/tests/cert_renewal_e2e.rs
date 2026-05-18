@@ -79,11 +79,12 @@ async fn renewal_fires_when_under_30_days_remaining() {
             .await
             .unwrap();
 
-    // Store the initial cert in a per-test file-storage namespace so
-    // reruns don't collide and we leave no global side effects.
-    let test_server_url = format!("{server_url}/renewal-{}", rand_suffix());
+    // Store the initial cert in the file-storage backend. The cert store
+    // is namespaced by `server_url`, and each test run gets a fresh
+    // ephemeral port (different `server_url` each run), so no collision
+    // with stale state from prior runs.
     shoebox_client::cert_store::store_in_file(
-        &test_server_url,
+        &server_url,
         &enroll_result.client_cert_pem,
         &enroll_result.client_key_pem,
     )
@@ -102,7 +103,7 @@ async fn renewal_fires_when_under_30_days_remaining() {
     let cfg_tmp = TempDir::new().unwrap();
     let cfg_path = cfg_tmp.path().join("client.toml");
     let initial_cfg = shoebox_client::config::ClientConfig {
-        server_url: test_server_url.clone(),
+        server_url: server_url.clone(),
         cert_serial_hex: enroll_result.cert_serial_hex.clone(),
         last_active_user_id: None,
     };
@@ -119,7 +120,7 @@ async fn renewal_fires_when_under_30_days_remaining() {
     let near_expiry_unix = now_secs + 5 * 24 * 60 * 60;
     let renewal_context = Arc::new(parking_lot::Mutex::new(
         shoebox_client::cert_renewal::RenewalContext {
-            server_url: test_server_url.clone(),
+            server_url: server_url.clone(),
             client: mtls_client.clone(),
             config_path: cfg_path.clone(),
             not_after_unix: near_expiry_unix,
@@ -154,21 +155,10 @@ async fn renewal_fires_when_under_30_days_remaining() {
         "renewal should have advanced not_after_unix (was {near_expiry_unix}, now {post_not_after})"
     );
 
-    // Best-effort cleanup of the per-test cert file. Keychain entries
-    // (if used) are namespaced by test_server_url and harmless.
-    let _ = shoebox_client::cert_store::delete_from_file(&test_server_url);
+    // Best-effort cleanup of the per-test cert file.
+    let _ = shoebox_client::cert_store::delete_from_file(&server_url);
 
     let _ = shutdown_tx.send(());
     let _ = server.await;
     test_db.shutdown().await;
-}
-
-/// Unique-ish suffix for the per-test file-storage namespace so reruns
-/// don't collide with stale state.
-fn rand_suffix() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("{nanos:x}")
 }

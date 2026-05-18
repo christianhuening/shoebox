@@ -123,15 +123,34 @@ pub async fn run_one(context: &Arc<parking_lot::Mutex<RenewalContext>>) -> Resul
     // attempt file storage with a logged warning (renewal isn't user-
     // interactive, so no "explicit consent" prompt fires — we keep the
     // existing storage location).
-    if let Err(keyring_err) =
-        crate::cert_store::store_in_keyring(&server_url, &renewed.client_cert_pem, &new_key_pem)
-    {
+    //
+    // Both keyring and file are sync APIs. The keyring backend on Linux
+    // (`dbus-secret-service`/`zbus`) calls `block_on` internally — that
+    // panics if invoked from a tokio worker thread. Defer to
+    // `spawn_blocking` so the call runs on a dedicated blocking thread
+    // regardless of platform.
+    let keyring_result = tokio::task::spawn_blocking({
+        let server_url = server_url.clone();
+        let cert_pem = renewed.client_cert_pem.clone();
+        let key_pem = new_key_pem.clone();
+        move || crate::cert_store::store_in_keyring(&server_url, &cert_pem, &key_pem)
+    })
+    .await
+    .context("joining keyring blocking task")?;
+    if let Err(keyring_err) = keyring_result {
         tracing::warn!(
             event = "client.cert_renewal.keyring_fallback",
             error = %keyring_err,
         );
-        crate::cert_store::store_in_file(&server_url, &renewed.client_cert_pem, &new_key_pem)
-            .context("file fallback for renewal cert store")?;
+        let file_result = tokio::task::spawn_blocking({
+            let server_url = server_url.clone();
+            let cert_pem = renewed.client_cert_pem.clone();
+            let key_pem = new_key_pem.clone();
+            move || crate::cert_store::store_in_file(&server_url, &cert_pem, &key_pem)
+        })
+        .await
+        .context("joining file-store blocking task")?;
+        file_result.context("file fallback for renewal cert store")?;
     }
 
     // Update client.toml's cert_serial_hex.
