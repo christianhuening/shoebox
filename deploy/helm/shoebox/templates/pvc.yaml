@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "shoebox.fullname" . }}-data
+  labels:
+    {{- include "shoebox.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.storage.data.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.data.size }}
+  {{- if .Values.storage.data.storageClassName }}
+  storageClassName: {{ .Values.storage.data.storageClassName }}
+  {{- end }}
+---
+{{- if .Values.storage.cache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "shoebox.fullname" . }}-cache
+  labels:
+    {{- include "shoebox.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.storage.cache.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.cache.size }}
+  {{- if .Values.storage.cache.storageClassName }}
+  storageClassName: {{ .Values.storage.cache.storageClassName }}
+  {{- end }}
+{{- end }}
