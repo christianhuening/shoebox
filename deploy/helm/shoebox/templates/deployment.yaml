@@ -1,0 +1,110 @@
+{{- include "shoebox.validateSecret" . -}}
+{{- include "shoebox.validatePhotos" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "shoebox.fullname" . }}
+  labels:
+    {{- include "shoebox.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "shoebox.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shoebox.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: shoebox-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: mtls
+              containerPort: {{ .Values.service.ports.mtls }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.service.ports.health }}
+              protocol: TCP
+          env:
+            - name: SHOEBOX_HEALTH_BIND_ADDR
+              value: "0.0.0.0:{{ .Values.service.ports.health }}"
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "shoebox.secretName" . }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/shoebox
+            - name: cache
+              mountPath: /shoebox-cache
+            - name: photos
+              mountPath: /photos
+              {{- with .Values.storage.photos.subPath }}
+              subPath: {{ . }}
+              {{- end }}
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "shoebox.fullname" . }}-data
+        - name: cache
+          {{- if .Values.storage.cache.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "shoebox.fullname" . }}-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: photos
+          {{- if .Values.storage.photos.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.photos.existingClaim }}
+          {{- else }}
+          hostPath:
+            path: {{ .Values.storage.photos.hostPath | quote }}
+            type: Directory
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
