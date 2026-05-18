@@ -19,7 +19,8 @@ use std::sync::OnceLock;
 
 use anyhow::Result;
 use axum::body::Body;
-use axum::extract::{Request, State, WebSocketUpgrade};
+use axum::extract::{FromRequestParts, Request, State, WebSocketUpgrade};
+use axum::http::request::Parts;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
@@ -30,6 +31,25 @@ use hyper_util::rt::TokioExecutor;
 
 use crate::http::AppState;
 use crate::identity::ClientIdentity;
+
+/// axum 0.8 dropped the blanket `Option<T>` extractor impl for things
+/// that didn't also implement `OptionalFromRequestParts` (which
+/// `WebSocketUpgrade` doesn't). This thin wrapper restores the
+/// "extract if the request is a WS upgrade, otherwise None" behaviour
+/// we relied on under axum 0.7.
+struct OptionalWebSocketUpgrade(Option<WebSocketUpgrade>);
+
+impl<S: Send + Sync> FromRequestParts<S> for OptionalWebSocketUpgrade {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Ok(OptionalWebSocketUpgrade(
+            WebSocketUpgrade::from_request_parts(parts, state)
+                .await
+                .ok(),
+        ))
+    }
+}
 
 /// Process-wide hyper clients for forwarding requests to the loopback `sqld`
 /// subprocess. One client for HTTP/1.1 Hrana traffic, one for HTTP/2 gRPC
@@ -68,8 +88,8 @@ fn is_grpc_request(req: &Request) -> bool {
 /// Build the `/v1/*` + `/v2/*` catch-all routes that forward to `sqld`.
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/*path", any(forward_http))
-        .route("/v2/*path", any(forward_http))
+        .route("/v1/{*path}", any(forward_http))
+        .route("/v2/{*path}", any(forward_http))
 }
 
 /// Forward either a regular HTTP request or a WebSocket upgrade to the
@@ -80,7 +100,7 @@ pub fn routes() -> Router<AppState> {
 async fn forward_http(
     State(state): State<AppState>,
     _identity: ClientIdentity,
-    websocket_upgrade: Option<WebSocketUpgrade>,
+    OptionalWebSocketUpgrade(websocket_upgrade): OptionalWebSocketUpgrade,
     mut req: Request,
 ) -> Response {
     if let Some(websocket_upgrade) = websocket_upgrade {
@@ -217,7 +237,12 @@ async fn forward_ws(
                     let Some(client_msg_result) = client_to_upstream else { break };
                     let client_msg = client_msg_result?;
                     let upstream_msg = match client_msg {
-                        AxumMessage::Text(text) => TungsteniteMessage::Text(text),
+                        // axum 0.8 and tungstenite use distinct (re-exported)
+                        // Utf8Bytes / Bytes types — convert by way of String /
+                        // raw bytes rather than relying on identical types.
+                        AxumMessage::Text(text) => {
+                            TungsteniteMessage::Text(text.as_str().into())
+                        }
                         AxumMessage::Binary(bytes) => TungsteniteMessage::Binary(bytes),
                         AxumMessage::Ping(payload) => TungsteniteMessage::Ping(payload),
                         AxumMessage::Pong(payload) => TungsteniteMessage::Pong(payload),
@@ -229,7 +254,9 @@ async fn forward_ws(
                     let Some(upstream_msg_result) = upstream_to_client else { break };
                     let upstream_msg = upstream_msg_result?;
                     let downstream_msg = match upstream_msg {
-                        TungsteniteMessage::Text(text) => AxumMessage::Text(text),
+                        TungsteniteMessage::Text(text) => {
+                            AxumMessage::Text(text.as_str().into())
+                        }
                         TungsteniteMessage::Binary(bytes) => AxumMessage::Binary(bytes),
                         TungsteniteMessage::Ping(payload) => AxumMessage::Ping(payload),
                         TungsteniteMessage::Pong(payload) => AxumMessage::Pong(payload),

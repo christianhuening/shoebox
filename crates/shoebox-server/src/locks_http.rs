@@ -27,10 +27,10 @@ const LOCK_TTL_MS: i64 = 15 * 60 * 1000;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/locks/:variant_id", post(acquire))
-        .route("/locks/:variant_id", put(heartbeat))
-        .route("/locks/:variant_id", delete(release))
-        .route("/locks/:variant_id/takeover", post(takeover))
+        .route("/locks/{variant_id}", post(acquire))
+        .route("/locks/{variant_id}", put(heartbeat))
+        .route("/locks/{variant_id}", delete(release))
+        .route("/locks/{variant_id}/takeover", post(takeover))
 }
 
 #[derive(Debug, Serialize)]

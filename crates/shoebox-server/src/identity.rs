@@ -21,7 +21,6 @@
 //! `MaybeClientIdentity` wraps this as `Ok(None)` for routes like `/enroll` that
 //! work with or without a cert.
 
-use axum::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
@@ -98,7 +97,6 @@ pub struct ClientIdentity {
     pub cert_serial_hex: String,
 }
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for ClientIdentity {
     type Rejection = (StatusCode, &'static str);
 
@@ -128,7 +126,6 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientIdentity {
 /// requests (it is the endpoint that grants you a cert).
 pub struct MaybeClientIdentity(pub Option<ClientIdentity>);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for MaybeClientIdentity {
     type Rejection = std::convert::Infallible;
 

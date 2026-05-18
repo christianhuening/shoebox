@@ -22,8 +22,8 @@ use crate::thumbnailer::{cache_path, ThumbnailKind};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/thumbs/:hash", get(get_thumb))
-        .route("/previews/:hash", get(get_preview))
+        .route("/thumbs/{hash}", get(get_thumb))
+        .route("/previews/{hash}", get(get_preview))
 }
 
 async fn get_thumb(

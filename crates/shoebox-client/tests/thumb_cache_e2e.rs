@@ -23,7 +23,7 @@ async fn serve(jpeg: Vec<u8>) -> (String, Arc<AtomicUsize>) {
     let counter_clone = counter.clone();
     let jpeg_clone = jpeg.clone();
     let app = Router::new().route(
-        "/thumbs/:hash",
+        "/thumbs/{hash}",
         get(move || {
             let counter = counter_clone.clone();
             let jpeg = jpeg_clone.clone();

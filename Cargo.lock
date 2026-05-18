@@ -544,7 +544,7 @@ dependencies = [
  "http-body 0.4.6",
  "hyper 0.14.32",
  "itoa",
- "matchit",
+ "matchit 0.7.3",
  "memchr",
  "mime",
  "percent-encoding",
@@ -559,14 +559,14 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.7.9"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
- "async-trait",
- "axum-core 0.4.5",
+ "axum-core 0.5.6",
  "base64 0.22.1",
  "bytes",
+ "form_urlencoded",
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
@@ -574,13 +574,12 @@ dependencies = [
  "hyper 1.9.0",
  "hyper-util",
  "itoa",
- "matchit",
+ "matchit 0.8.4",
  "memchr",
  "mime",
  "percent-encoding",
  "pin-project-lite",
- "rustversion",
- "serde",
+ "serde_core",
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
@@ -613,19 +612,17 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.4.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
 dependencies = [
- "async-trait",
  "bytes",
- "futures-util",
+ "futures-core",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "mime",
  "pin-project-lite",
- "rustversion",
  "sync_wrapper 1.0.2",
  "tower-layer",
  "tower-service",
@@ -634,12 +631,13 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ab4a3ec9ea8a657c72d99a03a824af695bd0fb5ec639ccbd9cd3543b41a5f9"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
 dependencies = [
  "arc-swap",
  "bytes",
+ "either",
  "fs-err",
  "http 1.4.0",
  "http-body 1.0.1",
@@ -647,7 +645,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "rustls 0.23.40",
- "rustls-pemfile",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -4154,6 +4151,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
+name = "matchit"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
 name = "md5"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6318,7 +6321,7 @@ name = "shoebox-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum 0.7.9",
+ "axum 0.8.9",
  "blake3",
  "directories",
  "futures-util",
@@ -6369,7 +6372,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
- "axum 0.7.9",
+ "axum 0.8.9",
  "axum-server",
  "blake3",
  "bytes",
@@ -7219,9 +7222,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.24.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
@@ -7582,20 +7585,18 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "tungstenite"
-version = "0.24.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
 dependencies = [
- "byteorder",
  "bytes",
  "data-encoding",
  "http 1.4.0",
  "httparse",
  "log",
- "rand 0.8.6",
+ "rand 0.9.4",
  "sha1",
- "thiserror 1.0.69",
- "utf-8",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7936,12 +7937,6 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
-
-[[package]]
-name = "utf-8"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "utf8-ranges"
