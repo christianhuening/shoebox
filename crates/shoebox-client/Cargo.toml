@@ -60,5 +60,5 @@ tower = { workspace = true }
 tempfile = "3"
 which = "6"
 axum = { workspace = true }
-shoebox-server = { path = "../shoebox-server" }
+shoebox-server = { path = "../shoebox-server", features = ["test-helpers"] }
 shoebox-common = { path = "../shoebox-common" }
