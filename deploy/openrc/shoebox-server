@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+# OpenRC init script for shoebox-server. Ships in linux tarballs under
+# share/openrc/ for Alpine, Gentoo, and OpenRC-based NAS distros.
+
+name="shoebox-server"
+description="shoebox catalog server"
+command="/opt/shoebox/bin/shoebox-server"
+command_background=true
+command_user="shoebox:shoebox"
+pidfile="/run/${name}.pid"
+output_log="/var/log/${name}.log"
+error_log="/var/log/${name}.log"
+
+# Operators set SHOEBOX_SECRET and overrides in /etc/conf.d/shoebox-server.
+# OpenRC sources that file automatically before launch.
+
+depend() {
+    need net
+    after firewall
+}

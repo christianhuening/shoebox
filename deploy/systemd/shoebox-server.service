@@ -1,0 +1,26 @@
+[Unit]
+Description=shoebox server
+Documentation=https://github.com/CHANGE-ME-OWNER/shoebox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shoebox
+Group=shoebox
+ExecStart=/opt/shoebox/bin/shoebox-server
+Environment=SHOEBOX_SQLD_PATH=/opt/shoebox/bin/sqld
+Environment=SHOEBOX_DATA_DIR=/var/lib/shoebox
+Environment=SHOEBOX_PHOTOS_DIR=/srv/photos
+Environment=SHOEBOX_CACHE_DIR=/var/cache/shoebox
+EnvironmentFile=-/etc/shoebox/shoebox.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/shoebox /var/cache/shoebox /srv/photos
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
