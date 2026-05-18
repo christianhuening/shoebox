@@ -16,6 +16,15 @@ jobs:
           toolchain: 1.85.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install sqld v0.24.32
+        run: |
+          set -eux
+          cd /tmp
+          wget -q https://github.com/tursodatabase/libsql/releases/download/libsql-server-v0.24.32/libsql-server-x86_64-unknown-linux-gnu.tar.xz
+          echo "71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f  libsql-server-x86_64-unknown-linux-gnu.tar.xz" | sha256sum -c -
+          tar -xJf libsql-server-x86_64-unknown-linux-gnu.tar.xz
+          sudo install -m 755 libsql-server-x86_64-unknown-linux-gnu/sqld /usr/local/bin/sqld
+          sqld --version
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
