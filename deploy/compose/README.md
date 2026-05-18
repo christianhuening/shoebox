@@ -13,7 +13,7 @@ cp .env.example .env
 echo "SHOEBOX_SECRET=$(openssl rand -base64 24)" >> .env
 
 # 3. Edit .env: set SHOEBOX_PHOTOS_DIR to the host path of your library
-$EDITOR .env
+${EDITOR:-nano} .env
 
 # 4. Start the server
 docker compose up -d
