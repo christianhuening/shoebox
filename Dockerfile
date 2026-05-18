@@ -12,11 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY rust-toolchain.toml Cargo.toml ./
 COPY crates/shoebox-common/Cargo.toml crates/shoebox-common/Cargo.toml
 COPY crates/shoebox-server/Cargo.toml crates/shoebox-server/Cargo.toml
+COPY crates/shoebox-client/Cargo.toml crates/shoebox-client/Cargo.toml
 
 # Stub sources so `cargo fetch` works without real code.
-RUN mkdir -p crates/shoebox-common/src crates/shoebox-server/src/migrations \
+RUN mkdir -p crates/shoebox-common/src \
+              crates/shoebox-server/src/migrations \
+              crates/shoebox-client/src \
     && echo "fn main() {}" > crates/shoebox-server/src/main.rs \
     && echo "" > crates/shoebox-common/src/lib.rs \
+    && echo "" > crates/shoebox-client/src/lib.rs \
     && cargo fetch
 
 COPY crates ./crates
@@ -30,19 +34,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install sqld so shoebox-server can spawn it as a subprocess (Plan 1.3).
 # Pin a specific release for reproducibility; verify against the published sha256.
-# URL + checksum confirmed against the libsql-server-v0.24.32 release on
-# 2026-05-17 (see Plan 1.3 Task 22).
+# Per-arch URLs and sums are selected via TARGETARCH at buildx time.
 ARG SQLD_VERSION=v0.24.32
-ARG SQLD_SHA256=71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f
+ARG SQLD_AMD64_SHA256=71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f
+ARG SQLD_ARM64_SHA256=37f9eee45b388a30192907ecf4565b93df945c079331657073b5b3caf8bb1cd0
+ARG TARGETARCH
 RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) sqld_target=x86_64-unknown-linux-gnu;  sha=${SQLD_AMD64_SHA256} ;; \
+      arm64) sqld_target=aarch64-unknown-linux-gnu; sha=${SQLD_ARM64_SHA256} ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+    esac; \
     cd /tmp; \
-    asset="libsql-server-x86_64-unknown-linux-gnu.tar.xz"; \
+    asset="libsql-server-${sqld_target}.tar.xz"; \
     wget -q "https://github.com/tursodatabase/libsql/releases/download/libsql-server-${SQLD_VERSION}/${asset}"; \
-    echo "${SQLD_SHA256}  ${asset}" | sha256sum -c -; \
+    echo "${sha}  ${asset}" | sha256sum -c -; \
     tar -xJf "${asset}"; \
-    mv "libsql-server-x86_64-unknown-linux-gnu/sqld" /usr/local/bin/sqld; \
+    mv "libsql-server-${sqld_target}/sqld" /usr/local/bin/sqld; \
     chmod +x /usr/local/bin/sqld; \
-    rm -rf "${asset}" libsql-server-x86_64-unknown-linux-gnu
+    rm -rf "${asset}" "libsql-server-${sqld_target}"
 
 COPY --from=builder /build/target/release/shoebox-server /usr/local/bin/shoebox-server
 
