@@ -1,0 +1,10 @@
+# Used by helm-lint.yml to exercise the cache-PVC and existingClaim paths.
+storage:
+  cache:
+    enabled: true
+    size: 5Gi
+  photos:
+    existingClaim: my-photos-pvc
+extraEnv:
+  - name: SHOEBOX_LOG
+    value: debug

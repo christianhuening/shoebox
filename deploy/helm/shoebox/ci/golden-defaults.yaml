@@ -1,0 +1,156 @@
+---
+# Source: shoebox/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: release-shoebox-bootstrap
+  labels:
+    helm.sh/chart: shoebox-0.1.0
+    app.kubernetes.io/name: shoebox
+    app.kubernetes.io/instance: release
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    # Keep the bootstrap secret across `helm uninstall` so client certs
+    # signed by the existing CA continue to authenticate after reinstall.
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  SHOEBOX_SECRET: "<REDACTED>"
+
+---
+# Source: shoebox/templates/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: release-shoebox-data
+  labels:
+    helm.sh/chart: shoebox-0.1.0
+    app.kubernetes.io/name: shoebox
+    app.kubernetes.io/instance: release
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Source: shoebox/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: release-shoebox
+  labels:
+    helm.sh/chart: shoebox-0.1.0
+    app.kubernetes.io/name: shoebox
+    app.kubernetes.io/instance: release
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - name: mtls
+      port: 9000
+      targetPort: mtls
+      protocol: TCP
+    - name: health
+      port: 9001
+      targetPort: health
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: shoebox
+    app.kubernetes.io/instance: release
+
+---
+# Source: shoebox/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-shoebox
+  labels:
+    helm.sh/chart: shoebox-0.1.0
+    app.kubernetes.io/name: shoebox
+    app.kubernetes.io/instance: release
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shoebox
+      app.kubernetes.io/instance: release
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shoebox
+        app.kubernetes.io/instance: release
+    spec:
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: shoebox-server
+          image: "ghcr.io/CHANGE-ME-OWNER/shoebox-server:0.1.0"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          ports:
+            - name: mtls
+              containerPort: 9000
+              protocol: TCP
+            - name: health
+              containerPort: 9001
+              protocol: TCP
+          env:
+            - name: SHOEBOX_HEALTH_BIND_ADDR
+              value: "0.0.0.0:9001"
+          envFrom:
+            - secretRef:
+                name: release-shoebox-bootstrap
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/shoebox
+            - name: cache
+              mountPath: /shoebox-cache
+            - name: photos
+              mountPath: /photos
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: release-shoebox-data
+        - name: cache
+          emptyDir: {}
+        - name: photos
+          hostPath:
+            path: "/srv/photos"
+            type: Directory
+        - name: tmp
+          emptyDir: {}
