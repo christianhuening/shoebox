@@ -68,3 +68,60 @@ jobs:
         if: always()
         working-directory: deploy/compose
         run: docker compose down -v
+
+  binary-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: 1.85.0, targets: x86_64-unknown-linux-gnu }
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p shoebox-server
+      - name: Package tarball
+        env:
+          TARGET: x86_64-unknown-linux-gnu
+          VERSION: v0.0.0-ci
+        run: bash .github/release/package-linux-amd64.sh
+      - name: Verify tarball contents
+        run: |
+          tar -tJf dist/shoebox-server-v0.0.0-ci-linux-amd64.tar.xz > /tmp/tarball.list
+          # Catch accidental drops of bundled artifacts.
+          for required in \
+              "shoebox-server-v0.0.0-ci-linux-amd64/bin/shoebox-server" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/bin/sqld" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/share/systemd/shoebox-server.service" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/share/openrc/shoebox-server" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/share/config.example.toml" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/README.md" \
+              "shoebox-server-v0.0.0-ci-linux-amd64/LICENSE"; do
+            grep -qF "${required}" /tmp/tarball.list || { echo "MISSING from tarball: ${required}"; exit 1; }
+          done
+          echo "tarball contents OK"
+      - name: Extract
+        run: |
+          mkdir -p smoke
+          tar -xJf dist/shoebox-server-v0.0.0-ci-linux-amd64.tar.xz -C smoke
+      - name: Run + health check
+        run: |
+          SHOEBOX_SECRET=$(openssl rand -base64 24)
+          SHOEBOX_DATA_DIR=$(mktemp -d)
+          SHOEBOX_PHOTOS_DIR=$(mktemp -d)
+          SHOEBOX_CACHE_DIR=$(mktemp -d)
+          SHOEBOX_SQLD_PATH=$(pwd)/smoke/shoebox-server-v0.0.0-ci-linux-amd64/bin/sqld
+          export SHOEBOX_SECRET SHOEBOX_DATA_DIR SHOEBOX_PHOTOS_DIR SHOEBOX_CACHE_DIR SHOEBOX_SQLD_PATH
+          ./smoke/shoebox-server-v0.0.0-ci-linux-amd64/bin/shoebox-server &
+          SERVER_PID=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:9001/health >/dev/null; then
+              echo "healthy after ${i}s"
+              kill ${SERVER_PID}
+              wait ${SERVER_PID} 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server never became healthy"
+          kill ${SERVER_PID} 2>/dev/null || true
+          exit 1
