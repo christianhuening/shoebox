@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_six_migrations_applied_in_order() {
+    async fn all_migrations_applied_in_order() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("catalog.db");
         let db = Db::open(&path).await.unwrap();
@@ -359,7 +359,163 @@ mod tests {
         while let Some(row) = rows.next().await.unwrap() {
             versions.push(row.get::<i64>(0).unwrap());
         }
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[tokio::test]
+    async fn migration_0007_partial_index_rejects_duplicate_root_keywords() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        conn.execute(
+            "INSERT INTO keywords(id, parent_id, name, created_at) VALUES('k1', NULL, 'trees', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+
+        // Same name at root level must now be rejected.
+        let duplicate = conn
+            .execute(
+                "INSERT INTO keywords(id, parent_id, name, created_at) \
+                 VALUES('k2', NULL, 'trees', 0)",
+                (),
+            )
+            .await;
+        assert!(
+            duplicate.is_err(),
+            "second root-level 'trees' should violate the partial unique index"
+        );
+
+        // Same name under a non-null parent still works — the partial
+        // index only applies to root keywords.
+        conn.execute(
+            "INSERT INTO keywords(id, parent_id, name, created_at) VALUES('p1', NULL, 'nature', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO keywords(id, parent_id, name, created_at) VALUES('c1', 'p1', 'trees', 0)",
+            (),
+        )
+        .await
+        .expect("nested 'trees' under a parent keyword is fine");
+    }
+
+    #[tokio::test]
+    async fn migration_0007_dedupes_existing_root_duplicates() {
+        // Spin up a server that's stopped at migration 0006, plant
+        // duplicate root keywords, then run the rest of the migrations
+        // and assert dedup + repointing happened.
+        use libsql::Builder;
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("catalog.db");
+
+        // Open a raw connection and apply only migrations 0001..0006 by
+        // running them inline (mirrors what Db::open would do, minus
+        // 0007 — easier than fighting the migration runner). Also seed
+        // `_schema_migrations` so Db::open's runner skips re-applying
+        // 0001..0006 and only runs 0007.
+        let raw = Builder::new_local(&path).build().await.unwrap();
+        let conn = raw.connect().unwrap();
+        conn.execute(
+            "CREATE TABLE _schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        for (version, sql) in [
+            (1, include_str!("../migrations/0001_identity.sql")),
+            (2, include_str!("../migrations/0002_files.sql")),
+            (3, include_str!("../migrations/0003_variants.sql")),
+            (4, include_str!("../migrations/0004_variant_user_state.sql")),
+            (5, include_str!("../migrations/0005_keywords.sql")),
+            (6, include_str!("../migrations/0006_collections.sql")),
+        ] {
+            conn.execute_batch(sql).await.unwrap();
+            conn.execute(
+                "INSERT INTO _schema_migrations(version, applied_at) VALUES (?1, 0)",
+                [version],
+            )
+            .await
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO users(id, display_name, created_at) VALUES('u1', 'Alice', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO photos(id, file_size, file_format, imported_at) \
+             VALUES('p1', 1, 'PEF', 0), ('p2', 1, 'PEF', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        // Two root keywords with the same name — duplicates that
+        // migration 0007 must collapse.
+        conn.execute(
+            "INSERT INTO keywords(id, parent_id, name, created_at) VALUES \
+             ('a', NULL, 'sunset', 0), \
+             ('b', NULL, 'sunset', 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        // p1 attached to the canonical 'a'; p2 attached to the duplicate 'b'.
+        conn.execute(
+            "INSERT INTO photo_keywords(photo_id, keyword_id, added_by, added_at) VALUES \
+             ('p1', 'a', 'u1', 0), \
+             ('p2', 'b', 'u1', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        drop(conn);
+        drop(raw);
+
+        // Now open via Db, which applies the remaining migration(s).
+        let db = Db::open(&path).await.unwrap();
+        let conn = db.connect().unwrap();
+
+        // 'b' is gone; only the canonical 'a' remains.
+        let mut rows = conn
+            .query(
+                "SELECT id FROM keywords WHERE parent_id IS NULL AND name='sunset' ORDER BY id",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut surviving = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            surviving.push(row.get::<String>(0).unwrap());
+        }
+        assert_eq!(surviving, vec!["a".to_string()]);
+
+        // p2's attachment was repointed to 'a'.
+        let mut pk_rows = conn
+            .query(
+                "SELECT photo_id, keyword_id FROM photo_keywords ORDER BY photo_id",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut attachments = Vec::new();
+        while let Some(row) = pk_rows.next().await.unwrap() {
+            attachments.push((row.get::<String>(0).unwrap(), row.get::<String>(1).unwrap()));
+        }
+        assert_eq!(
+            attachments,
+            vec![
+                ("p1".to_string(), "a".to_string()),
+                ("p2".to_string(), "a".to_string()),
+            ]
+        );
     }
 
     #[tokio::test]
