@@ -40,32 +40,28 @@ docker build -t shoebox-server:dev .
 docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev
 ```
 
-## Docker deployment details
+## Deployment
 
-The image build downloads a pinned `sqld` release binary into
-`/usr/local/bin/sqld`; the version is controlled by the `SQLD_VERSION` build
-arg (defaults to `v0.24.32`). The runtime stage exposes the mTLS-protected
-catalog port (9000) and the unauthenticated loopback `/health` + `/metrics`
-port (9001, only useful from container healthchecks or in-host scrapers).
+shoebox-server v0.1.0 ships three deployment paths. Pick one:
 
-On first run, the server prints a generated enrollment secret to the log
-exactly once. Share it with users out-of-band; they'll need it to enroll
-their clients. To pre-set the secret, pass `-e SHOEBOX_SECRET=your-phrase`.
+| Path | Best for | Docs |
+|---|---|---|
+| **Docker** | NASes with a Docker runtime, home servers, generic VMs | [docs/deployment/quickstart-docker.md](docs/deployment/quickstart-docker.md) |
+| **Standalone binary** | NASes without Docker, dedicated Mac mini hosts, Alpine/Gentoo (OpenRC) | [docs/deployment/quickstart-binary.md](docs/deployment/quickstart-binary.md) |
+| **Helm chart** | Existing Kubernetes clusters | [docs/deployment/quickstart-kubernetes.md](docs/deployment/quickstart-kubernetes.md) |
 
-Run with a host-mounted directory (matches a typical NAS deployment).
-The container runs as UID 10001 (`shoebox`), so the host directory must
-be owned by that UID:
+All three start a server that listens on `:9000` (mTLS) and `:9001`
+(health + Prometheus metrics, loopback by default). Each desktop client
+enrolls against the server using the shared bootstrap secret.
 
-```bash
-mkdir -p /srv/shoebox-data
-sudo chown 10001:10001 /srv/shoebox-data
-docker run --rm -p 9000:9000 \
-  -v /srv/shoebox-data:/var/lib/shoebox \
-  shoebox-server:dev
-```
+- **Images:** `ghcr.io/<owner>/shoebox-server` (multi-arch: `linux/amd64`, `linux/arm64`).
+- **Release artifacts:** https://github.com/<owner>/shoebox/releases
+- **Helm chart README:** [`deploy/helm/shoebox/README.md`](deploy/helm/shoebox/README.md)
+- **Compose example:** [`deploy/compose/`](deploy/compose/)
 
-A docker-compose template for typical NAS deployments (Synology, QNAP,
-TrueNAS) ships in Plan 1.5.
+Sub-project #1 (catalog + sync + stack) is complete with v0.1.0.
+RAW pipeline, library UI, develop module, and export are sub-projects
+#2-#5, not yet started.
 
 ## Running the client
 
