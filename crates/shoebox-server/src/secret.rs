@@ -66,8 +66,8 @@ pub async fn ensure_present(conn: &Connection) -> Result<EnsureOutcome> {
 }
 
 fn generate_random_secret() -> String {
-    use rand::{distributions::Alphanumeric, Rng};
-    rand::thread_rng()
+    use rand::{distr::Alphanumeric, Rng};
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(24)
         .map(char::from)

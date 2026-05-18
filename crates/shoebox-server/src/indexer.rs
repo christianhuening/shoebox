@@ -299,7 +299,7 @@ fn is_raw_file(path: &Path) -> bool {
 fn uuid_hex() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 

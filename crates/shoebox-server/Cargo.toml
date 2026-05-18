@@ -64,7 +64,7 @@ reqwest = { workspace = true }
 # dev-dependencies so the `test_helpers` module can use `tempfile` when
 # downstream crates compile this crate's tests with `features = ["test-helpers"]`.
 tempfile = { version = "3", optional = true }
-which = { version = "6", optional = true }
+which = { version = "8", optional = true }
 
 [features]
 default = []
@@ -78,4 +78,4 @@ reqwest = { workspace = true }
 rcgen = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
-which = "6"
+which = "8"

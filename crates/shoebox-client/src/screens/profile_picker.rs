@@ -81,7 +81,7 @@ pub async fn create_user(
 ) -> Result<UserRow, anyhow::Error> {
     use rand::RngCore;
     let mut id_bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut id_bytes);
+    rand::rng().fill_bytes(&mut id_bytes);
     let new_id = hex::encode(id_bytes);
     let now_ms = i64::try_from(
         std::time::SystemTime::now()

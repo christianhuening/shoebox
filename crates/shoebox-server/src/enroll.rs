@@ -148,14 +148,14 @@ fn sign_csr(
 fn random_user_id() -> UserId {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     UserId(hex::encode(bytes))
 }
 
 fn random_machine_id() -> MachineId {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     MachineId(hex::encode(bytes))
 }
 
