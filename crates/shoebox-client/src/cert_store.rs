@@ -8,10 +8,27 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
 const SERVICE_PREFIX: &str = "shoebox-client";
 const FILE_CERT_NAME: &str = "client.cert.pem";
 const FILE_KEY_NAME: &str = "client.key.pem";
+
+/// keyring 4 dropped its default-backend auto-init; callers must register
+/// one before any `Entry::new`. Do it lazily on first access.
+///
+/// `not_keyutils = true` selects Secret Service on Linux (persistent
+/// across reboots) over kernel keyutils (session-scoped, lost on logout) —
+/// matches the persistence guarantee shoebox needs for client certs.
+static INIT_KEYRING_BACKEND: Once = Once::new();
+fn ensure_keyring_backend() {
+    INIT_KEYRING_BACKEND.call_once(|| {
+        // Errors here just leave the default store unset; subsequent
+        // Entry::new() calls will fail loudly with NoDefaultStore, which
+        // is what we want (surface backend issues to the consent flow).
+        let _ = keyring::use_native_store(true);
+    });
+}
 
 /// Identifies which half of a cert pair an entry holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,9 +50,10 @@ fn service_name(server_url: &str, kind: EntryKind) -> String {
     format!("{SERVICE_PREFIX}::{}::{}", kind.suffix(), server_url)
 }
 
-fn keyring_entry(server_url: &str, kind: EntryKind) -> Result<keyring::Entry> {
+fn keyring_entry(server_url: &str, kind: EntryKind) -> Result<keyring_core::Entry> {
+    ensure_keyring_backend();
     let service = service_name(server_url, kind);
-    keyring::Entry::new(&service, "default-user")
+    keyring_core::Entry::new(&service, "default-user")
         .with_context(|| format!("opening keyring entry for {service}"))
 }
 
@@ -67,12 +85,12 @@ pub fn store_in_keyring(server_url: &str, cert_pem: &str, key_pem: &str) -> Resu
 pub fn load_from_keyring(server_url: &str) -> Result<Option<(String, String)>> {
     let cert_pem = match keyring_entry(server_url, EntryKind::Cert)?.get_password() {
         Ok(pem) => pem,
-        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(keyring_core::Error::NoEntry) => return Ok(None),
         Err(other) => return Err(anyhow!("reading cert from keyring: {other}")),
     };
     let key_pem = match keyring_entry(server_url, EntryKind::Key)?.get_password() {
         Ok(pem) => pem,
-        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(keyring_core::Error::NoEntry) => return Ok(None),
         Err(other) => return Err(anyhow!("reading key from keyring: {other}")),
     };
     Ok(Some((cert_pem, key_pem)))
@@ -86,7 +104,7 @@ pub fn load_from_keyring(server_url: &str) -> Result<Option<(String, String)>> {
 pub fn delete_from_keyring(server_url: &str) -> Result<()> {
     for kind in [EntryKind::Cert, EntryKind::Key] {
         match keyring_entry(server_url, kind)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Ok(()) | Err(keyring_core::Error::NoEntry) => {}
             Err(delete_err) => return Err(anyhow!("deleting {kind:?} from keyring: {delete_err}")),
         }
     }
@@ -205,7 +223,7 @@ mod tests {
     /// same service comes back empty — that's the signal to skip.
     fn skip_if_no_backend() -> bool {
         let service = format!("shoebox-test-probe-{}", uuid_like());
-        let Ok(writer) = keyring::Entry::new(&service, "probe-user") else {
+        let Ok(writer) = keyring_core::Entry::new(&service, "probe-user") else {
             eprintln!("skipping: keyring backend unavailable");
             return true;
         };
@@ -213,7 +231,7 @@ mod tests {
             eprintln!("skipping: keyring backend present but write failed");
             return true;
         }
-        let Ok(reader) = keyring::Entry::new(&service, "probe-user") else {
+        let Ok(reader) = keyring_core::Entry::new(&service, "probe-user") else {
             let _ = writer.delete_credential();
             eprintln!("skipping: keyring backend unavailable on re-open");
             return true;

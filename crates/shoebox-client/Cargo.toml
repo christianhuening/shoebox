@@ -38,6 +38,7 @@ blake3 = { workspace = true }
 time = { workspace = true }
 iced = { workspace = true }
 keyring = { workspace = true }
+keyring-core = { workspace = true }
 directories = { workspace = true }
 lru = { workspace = true }
 image = { workspace = true }

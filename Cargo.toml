@@ -71,9 +71,10 @@ bytes = "1"
 futures-util = "0.3"
 # Desktop client deps (Plan 1.4 Task 1)
 iced = { version = "0.13", default-features = false, features = ["wgpu", "tokio", "advanced", "image"] }
-# keyring 3 → 4 deferred: keyring 4.0.1 dropped all feature flags and
-# reworked its backend selection. Stay on 3 until a focused migration.
-keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-async-persistent", "crypto-rust", "tokio"] }
+keyring = "4"
+# `keyring` 4 only re-exports backend-selection helpers; `Entry`,
+# `Error`, etc. now live in `keyring-core`.
+keyring-core = "1"
 lru = "0.18"
 directories = "6"
 
