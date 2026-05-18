@@ -1,0 +1,51 @@
+image:
+  repository: ghcr.io/CHANGE-ME-OWNER/shoebox-server
+  tag: ""                    # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+secret:
+  create: true               # auto-generate a SHOEBOX_SECRET on first install
+  existingSecret: ""         # name of pre-created Secret (mutually exclusive with create)
+  key: SHOEBOX_SECRET        # key inside the Secret
+
+storage:
+  data:
+    size: 1Gi
+    storageClassName: ""
+    accessMode: ReadWriteOnce
+  cache:
+    enabled: false           # true => dedicated PVC; false => emptyDir
+    size: 10Gi
+    storageClassName: ""
+    accessMode: ReadWriteOnce
+  photos:
+    existingClaim: ""        # operator-supplied PVC; exclusive with hostPath
+    hostPath: ""             # exclusive with existingClaim
+    subPath: ""
+
+service:
+  type: ClusterIP
+  ports:
+    mtls: 9000
+    health: 9001
+
+resources: {}                # operator-supplied; no defaults
+
+podSecurityContext:
+  fsGroup: 10001
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []                 # e.g. [{ name: SHOEBOX_LOG, value: debug }]

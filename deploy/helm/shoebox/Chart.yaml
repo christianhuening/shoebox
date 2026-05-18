@@ -1,0 +1,12 @@
+apiVersion: v2
+name: shoebox
+description: Single-replica shoebox catalog server with embedded sqld.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/CHANGE-ME-OWNER/shoebox
+sources:
+  - https://github.com/CHANGE-ME-OWNER/shoebox
+maintainers:
+  - name: shoebox-maintainers
+kubeVersion: ">=1.25.0-0"
