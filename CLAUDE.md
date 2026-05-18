@@ -121,7 +121,6 @@ Surfaced during Plan 1.3/1.4/1.4b implementation; tracked as memory notes for fu
 - **Two writers to `catalog.db`.** The migration runner (`Db`) and the spawned `sqld` subprocess both hold the same SQLite file. SQLite WAL handles this badly across processes; the v1 risk is accepted. Resolution: route all server-side writes through the loopback sqld connection. See memory: `project_libsql_server_unpublished.md`.
 - **No grid virtualization.** Folders with thousands of photos will render slowly. Plan 1.4b grids ~30-photo test sets cleanly; full virtualization is sub-project #3.
 - **Lock UI surfaces 4 states, no auto-release on app exit.** Releasing a lock requires the user clicking Release; if the app dies, the lock expires via the server janitor's 30 min TTL instead.
-- **Keywords UNIQUE(parent_id, name) doesn't dedupe roots.** SQLite UNIQUE-on-NULL treats NULLs as distinct; the client's `add_keyword` SELECTs-then-INSERTs as a workaround. Server schema needs a partial unique index in a future migration. See memory: `project_keywords_unique_null_root.md`.
 
 ## Memory pointers
 
