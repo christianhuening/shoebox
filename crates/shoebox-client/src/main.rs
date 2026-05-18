@@ -49,9 +49,13 @@ fn main() -> iced::Result {
     // `ClientConfig::builder()` paths in `mtls_http` + `replica` both
     // require a provider to be installed for the process.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    iced::application("shoebox", App::update, App::view)
+    // iced 0.14 reshaped `application()`: the first parameter is now the
+    // boot function (was the window title), and the runner method is
+    // `.run()` instead of `.run_with(boot)`. Title is set separately.
+    iced::application(App::new, App::update, App::view)
+        .title("shoebox")
         .subscription(App::subscription)
-        .run_with(App::new)
+        .run()
 }
 
 struct App {

@@ -44,26 +44,32 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 }
 
 pub fn keyboard_subscription() -> Subscription<Message> {
-    iced::keyboard::on_key_press(|key, _modifiers| match key {
-        Key::Named(Named::ArrowLeft) => Some(Message::LibraryKeyboardNavigation(
-            NavigationDirection::Left,
-        )),
-        Key::Named(Named::ArrowRight) => Some(Message::LibraryKeyboardNavigation(
-            NavigationDirection::Right,
-        )),
-        Key::Named(Named::ArrowUp) => {
-            Some(Message::LibraryKeyboardNavigation(NavigationDirection::Up))
-        }
-        Key::Named(Named::ArrowDown) => Some(Message::LibraryKeyboardNavigation(
-            NavigationDirection::Down,
-        )),
-        Key::Character(c) => match c.as_str() {
-            "0" => Some(Message::LibraryKeyboardRating(0)),
-            "1" => Some(Message::LibraryKeyboardRating(1)),
-            "2" => Some(Message::LibraryKeyboardRating(2)),
-            "3" => Some(Message::LibraryKeyboardRating(3)),
-            "4" => Some(Message::LibraryKeyboardRating(4)),
-            "5" => Some(Message::LibraryKeyboardRating(5)),
+    // iced 0.14 removed the `on_key_press` convenience helper; the
+    // canonical replacement is `keyboard::listen()` for raw events,
+    // filtered down to `KeyPressed` with `Subscription::filter_map`.
+    iced::keyboard::listen().filter_map(|event| match event {
+        iced::keyboard::Event::KeyPressed { key, .. } => match key {
+            Key::Named(Named::ArrowLeft) => Some(Message::LibraryKeyboardNavigation(
+                NavigationDirection::Left,
+            )),
+            Key::Named(Named::ArrowRight) => Some(Message::LibraryKeyboardNavigation(
+                NavigationDirection::Right,
+            )),
+            Key::Named(Named::ArrowUp) => {
+                Some(Message::LibraryKeyboardNavigation(NavigationDirection::Up))
+            }
+            Key::Named(Named::ArrowDown) => Some(Message::LibraryKeyboardNavigation(
+                NavigationDirection::Down,
+            )),
+            Key::Character(c) => match c.as_str() {
+                "0" => Some(Message::LibraryKeyboardRating(0)),
+                "1" => Some(Message::LibraryKeyboardRating(1)),
+                "2" => Some(Message::LibraryKeyboardRating(2)),
+                "3" => Some(Message::LibraryKeyboardRating(3)),
+                "4" => Some(Message::LibraryKeyboardRating(4)),
+                "5" => Some(Message::LibraryKeyboardRating(5)),
+                _ => None,
+            },
             _ => None,
         },
         _ => None,

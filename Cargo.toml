@@ -67,7 +67,12 @@ http-body-util = "0.1"
 bytes = "1"
 futures-util = "0.3"
 # Desktop client deps (Plan 1.4 Task 1)
-iced = { version = "0.13", default-features = false, features = ["wgpu", "tokio", "advanced", "image"] }
+# iced 0.14 made the Linux backends (`x11`, `wayland`) explicit default
+# features; with `default-features = false` you must opt back into the
+# platform backend or winit fails to compile on Linux. We enable both
+# for cross-distro coverage. `crisp` is iced 0.14's improved text
+# subpixel rendering; cheap to include.
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tokio", "advanced", "image", "x11", "wayland", "crisp"] }
 keyring = "4"
 # `keyring` 4 only re-exports backend-selection helpers; `Entry`,
 # `Error`, etc. now live in `keyring-core`.
