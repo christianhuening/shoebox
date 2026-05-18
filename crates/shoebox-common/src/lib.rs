@@ -8,4 +8,4 @@ pub use identity::{MachineId, UserId};
 
 /// Schema version this build of shoebox understands.
 /// Update this when the migration set changes.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;

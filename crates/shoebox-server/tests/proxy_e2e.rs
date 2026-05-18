@@ -132,25 +132,23 @@ async fn libsql_http_request_reaches_embedded_sqld_through_proxy() {
         .build()
         .unwrap();
 
-    // Hit a libSQL health endpoint via the proxy. Success indicates the proxy
-    // is wired correctly; 401 means the auth extractor rejected us; 502 means
-    // the upstream is unreachable. Different sqld versions expose different
-    // health paths, so try a small set and accept any 2xx.
-    let mut last_status = None;
-    for health_path in ["/v1/health", "/v2/health", "/v1/info"] {
-        let probe_resp = authed_http
-            .get(format!("https://{addr}{health_path}"))
-            .send()
-            .await
-            .unwrap();
-        last_status = Some(probe_resp.status());
-        if probe_resp.status().is_success() {
-            break;
-        }
-    }
+    // Hit sqld's Hrana v2 pipeline endpoint through the proxy with a
+    // minimal "close-baton" request. Success indicates the proxy is
+    // wired correctly; 401 would mean the auth extractor rejected us;
+    // 502 would mean the upstream is unreachable. sqld doesn't expose
+    // a /v1/health or /v2/health path, so probing those is meaningless
+    // — `/v2/pipeline` is the actual Hrana endpoint we care about.
+    let probe_resp = authed_http
+        .post(format!("https://{addr}/v2/pipeline"))
+        .header("content-type", "application/json")
+        .body(r#"{"requests":[]}"#)
+        .send()
+        .await
+        .unwrap();
     assert!(
-        matches!(last_status, Some(status) if status.is_success()),
-        "expected at least one libsql health path to return 2xx through the proxy, last status: {last_status:?}"
+        probe_resp.status().is_success(),
+        "expected /v2/pipeline through the proxy to return 2xx, got: {}",
+        probe_resp.status()
     );
 
     let _ = shutdown_tx.send(());
