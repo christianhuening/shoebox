@@ -1,9 +1,14 @@
 //! libSQL database lifecycle: open, run migrations.
+//!
+//! As of sub-1-3-5, `Db::open` connects to the embedded `sqld` subprocess
+//! via libsql's remote backend (Hrana HTTP over loopback) rather than
+//! opening a local SQLite file directly. `sqld` is the single backing
+//! store for both server-side writes (this Db) and client-side replicas
+//! (which sync from sqld's gRPC port through the mTLS proxy).
 
 use anyhow::{anyhow, Context, Result};
 use include_dir::{include_dir, Dir};
 use libsql::{Builder, Connection, Database};
-use std::path::Path;
 
 static MIGRATIONS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/migrations");
 
@@ -12,13 +17,17 @@ pub struct Db {
 }
 
 impl Db {
-    /// Open (creating if absent) the libSQL database at the given path
-    /// and apply all pending migrations.
-    pub async fn open(path: &Path) -> Result<Self> {
-        let database = Builder::new_local(path)
+    /// Open a libsql `Database` connected over HTTP to the loopback
+    /// `sqld` subprocess at `sqld_http_url`, and apply all pending
+    /// migrations through that connection. `sqld` is the single backing
+    /// store for both server-side writes and client-side replicas.
+    pub async fn open(sqld_http_url: &str) -> Result<Self> {
+        let database = Builder::new_remote(sqld_http_url.to_string(), String::new())
             .build()
             .await
-            .map_err(|e| anyhow!("failed to open libSQL database at {}: {e}", path.display()))?;
+            .map_err(|e| {
+                anyhow!("failed to open libSQL remote database at {sqld_http_url}: {e}")
+            })?;
 
         let conn = database
             .connect()
@@ -293,14 +302,11 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn opens_and_applies_migrations() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         // _schema_migrations exists and contains version 1.
         let mut rows = conn
@@ -314,17 +320,15 @@ mod tests {
         let version: i64 = row.get(0).unwrap();
         assert_eq!(version, 1);
 
-        // Reopening is a no-op: migrations are idempotent.
-        let db2 = Db::open(&path).await.unwrap();
+        // Reopening against the same sqld is a no-op: migrations are idempotent.
+        let db2 = Db::open(&test_db.embedded.local_url).await.unwrap();
         drop(db2);
     }
 
     #[tokio::test]
     async fn migration_0006_creates_collection_tables() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         for table in ["collections", "collection_members"] {
             let mut rows = conn
@@ -343,10 +347,8 @@ mod tests {
 
     #[tokio::test]
     async fn all_migrations_applied_in_order() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         let mut rows = conn
             .query(
@@ -364,10 +366,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0007_partial_index_rejects_duplicate_root_keywords() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         conn.execute(
             "INSERT INTO keywords(id, parent_id, name, created_at) VALUES('k1', NULL, 'trees', 0)",
@@ -407,10 +407,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0005_creates_keyword_tables() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         for table in ["keywords", "photo_keywords"] {
             let mut rows = conn
@@ -429,10 +427,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0004_creates_variant_user_state() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         let mut rows = conn
             .query(
@@ -446,10 +442,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0003_creates_variant_tables() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         for table in ["variants", "develop_locks"] {
             let mut rows = conn
@@ -468,10 +462,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0002_creates_file_tables() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         for table in ["folders", "photos", "photo_files"] {
             let mut rows = conn
@@ -490,10 +482,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_0001_creates_identity_tables() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("catalog.db");
-        let db = Db::open(&path).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         for table in ["config", "users", "sessions", "revoked_certs"] {
             let mut rows = conn
@@ -512,8 +502,8 @@ mod tests {
 
     #[tokio::test]
     async fn revoked_serial_round_trips() {
-        let tmp = TempDir::new().unwrap();
-        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let db = test_db.db.clone();
         assert!(!db.is_serial_revoked("abc123").await.unwrap());
         db.insert_revoked_cert("abc123", Some("test"), None)
             .await
@@ -527,8 +517,8 @@ mod tests {
 
     #[tokio::test]
     async fn lock_lifecycle_roundtrips() {
-        let tmp = TempDir::new().unwrap();
-        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let db = test_db.db.clone();
         let conn = db.connect().unwrap();
 
         // Set up FK chain: users, session, photo, variant.

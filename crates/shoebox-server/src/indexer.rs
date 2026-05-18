@@ -531,11 +531,8 @@ mod tests {
         let cache_dir = tmp.path().join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
 
-        let db = Arc::new(
-            crate::db::Db::open(&tmp.path().join("catalog.db"))
-                .await
-                .unwrap(),
-        );
+        let test_db = crate::test_helpers::TestDb::start().await;
+        let db = test_db.db.clone();
         let stats = initial_scan(db.clone(), &photos, &cache_dir).await.unwrap();
 
         // 3 empty RAW files all hash to the same BLAKE3, so just 1 photo row,

@@ -17,16 +17,16 @@ use tokio::sync::oneshot;
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn revoked_cert_cannot_reconnect() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_path_buf();
 
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&data_dir.join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
+    let db = test_db.db.clone();
     let conn = db.connect().unwrap();
     let shoebox_server::secret::EnsureOutcome::Generated {
         plaintext: secret_plaintext,
@@ -49,8 +49,8 @@ async fn revoked_cert_cannot_reconnect() {
         db: db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
-        sqld_url: "http://127.0.0.1:0".to_string(),
-        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: tmp.path().to_path_buf(),
     };
 

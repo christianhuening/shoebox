@@ -1,9 +1,8 @@
 //! End-to-end: enroll two clients (Alice + Bob), exercise the develop-lock
 //! REST flow between them — acquire, conflict, takeover, release, re-acquire.
 //!
-//! No `sqld` dependency: the lock endpoints all go directly to `Db::lock_*`,
-//! bypassing the libSQL wire proxy. `AppState.sqld_url` is therefore an
-//! intentionally-unreachable dummy URL.
+//! Sub-1-3-5 routed Db through sqld, so this test now depends on sqld too
+//! (TestDb spawns one). Skipped when sqld is not on PATH.
 
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use reqwest::Client;
@@ -16,6 +15,9 @@ use tokio::sync::oneshot;
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn develop_lock_acquire_takeover_release() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     // Install rustls provider once per test process.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -25,11 +27,8 @@ async fn develop_lock_acquire_takeover_release() {
     std::fs::create_dir_all(&cache_dir).unwrap();
 
     // Bootstrap server-side state.
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&data_dir.join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
+    let db = test_db.db.clone();
     let conn = db.connect().unwrap();
     let secret_plaintext = match shoebox_server::secret::ensure_present(&conn).await.unwrap() {
         shoebox_server::secret::EnsureOutcome::Generated { plaintext } => plaintext,
@@ -73,14 +72,13 @@ async fn develop_lock_acquire_takeover_release() {
     let tls_cfg =
         shoebox_server::mtls::mtls_server_config(&server_cert, &server_keypair, &ca, crl).unwrap();
 
-    // Dummy sqld URL — the lock endpoints don't go through the proxy, so
-    // there is no need to spawn an actual sqld subprocess here.
+    // TestDb already spawned sqld; use its loopback URLs in the state.
     let state = shoebox_server::http::AppState {
         db: db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
-        sqld_url: "http://127.0.0.1:0".to_string(),
-        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

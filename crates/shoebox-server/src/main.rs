@@ -1,6 +1,6 @@
 use shoebox_server::{
     backup, ca, cert_renewal, cli, config, db, http, indexer, janitor, logging, mdns, metrics,
-    mtls, revoke, secret, sqld_embed, tls_server,
+    mtls, revoke, secret, sqld_embed, tls_server, upgrade,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -45,7 +45,19 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
     );
 
     std::fs::create_dir_all(&cfg.data_dir)?;
-    let db = Arc::new(db::Db::open(&cfg.data_dir.join("catalog.db")).await?);
+
+    // Pre-startup migration: rename a pre-sub-1-3-5 catalog.db if present.
+    upgrade::rename_legacy_catalog_db(&cfg.data_dir)?;
+
+    // sqld must be running before we can open the Db. Sub-1-3-5 made sqld
+    // the single backing store for both server-side writes and
+    // client-side replicas, so `Db` connects to it via libsql's remote
+    // backend (Hrana HTTP over loopback). `embedded_sqld` lives for the
+    // duration of `serve_main`; `Drop` (via `kill_on_drop(true)`) ensures
+    // the child is terminated on shutdown even if `shutdown().await` is
+    // not reached due to an early error return.
+    let embedded_sqld = sqld_embed::start(cfg.data_dir.clone()).await?;
+    let db = Arc::new(db::Db::open(&embedded_sqld.local_url).await?);
 
     // Bootstrap CA and ensure server cert.
     let ca = Arc::new(ca::Ca::open(&cfg.data_dir)?);
@@ -90,14 +102,6 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
             );
         }
     }
-
-    // Spawn the embedded sqld subprocess (loopback only). The proxy
-    // forwards mTLS-authenticated `/v1/*` and `/v2/*` traffic to this URL.
-    // `embedded_sqld` is bound to a local variable so it lives for the
-    // duration of `serve_main`; `Drop` (via `kill_on_drop(true)`) ensures
-    // the child is terminated on shutdown even if `shutdown().await` is
-    // not reached due to an early error return.
-    let embedded_sqld = sqld_embed::start(cfg.data_dir.clone()).await?;
 
     // Initial scan + live watcher (see `start_indexer`). Missing photos
     // directory is treated as a no-op — both bindings stay `None` and the

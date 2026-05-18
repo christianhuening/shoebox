@@ -7,20 +7,19 @@ use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn full_server_serves_health() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     let tmp = TempDir::new().unwrap();
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&tmp.path().join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
 
     let ca = Arc::new(shoebox_server::ca::Ca::open(tmp.path()).unwrap());
     let state = shoebox_server::http::AppState {
-        db,
+        db: test_db.db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
-        sqld_url: "http://127.0.0.1:0".to_string(),
-        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: tmp.path().to_path_buf(),
     };
 
@@ -42,7 +41,7 @@ async fn full_server_serves_health() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["schema_version"], 6);
+    assert_eq!(body["schema_version"], shoebox_common::SCHEMA_VERSION);
 
     let _ = tx.send(());
     server.await.unwrap();

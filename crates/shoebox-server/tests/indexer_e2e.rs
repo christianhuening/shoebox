@@ -1,22 +1,21 @@
 //! End-to-end: start the indexer watcher, drop a RAW file into the watched
 //! directory, observe the catalog gets a `photos` row + `photo_files` row.
 
-use std::sync::Arc;
 use tempfile::TempDir;
 
 #[tokio::test]
 async fn watcher_picks_up_dropped_file() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
     let photos_root = temp_dir.path().join("photos");
     let cache_dir = temp_dir.path().join("cache");
     std::fs::create_dir_all(&photos_root).unwrap();
     std::fs::create_dir_all(&cache_dir).unwrap();
 
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&temp_dir.path().join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
+    let db = test_db.db.clone();
 
     let _initial_stats =
         shoebox_server::indexer::initial_scan(db.clone(), &photos_root, &cache_dir)

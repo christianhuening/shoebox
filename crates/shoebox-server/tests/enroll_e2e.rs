@@ -17,18 +17,18 @@ use tokio::sync::oneshot;
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn enroll_then_use_cert_to_call_whoami() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     // Install rustls provider once per test process.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_path_buf();
 
-    // Bootstrap server-side state.
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&data_dir.join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    // Bootstrap server-side state through sqld (single source of truth).
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
+    let db = test_db.db.clone();
     let conn = db.connect().unwrap();
     let secret_plaintext = match shoebox_server::secret::ensure_present(&conn).await.unwrap() {
         shoebox_server::secret::EnsureOutcome::Generated { plaintext } => plaintext,
@@ -52,8 +52,8 @@ async fn enroll_then_use_cert_to_call_whoami() {
         db: db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
-        sqld_url: "http://127.0.0.1:0".to_string(),
-        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: tmp.path().to_path_buf(),
     };
 

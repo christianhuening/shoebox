@@ -82,14 +82,12 @@ pub enum EnsureOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Db;
-    use tempfile::TempDir;
+    use crate::test_helpers::TestDb;
 
     #[tokio::test]
     async fn first_call_generates_and_persists() {
-        let tmp = TempDir::new().unwrap();
-        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
 
         match ensure_present(&conn).await.unwrap() {
             EnsureOutcome::Generated { plaintext } => assert_eq!(plaintext.len(), 24),
@@ -104,9 +102,8 @@ mod tests {
 
     #[tokio::test]
     async fn verify_accepts_correct_secret() {
-        let tmp = TempDir::new().unwrap();
-        let db = Db::open(&tmp.path().join("catalog.db")).await.unwrap();
-        let conn = db.connect().unwrap();
+        let test_db = TestDb::start().await;
+        let conn = test_db.db.connect().unwrap();
         let plaintext = match ensure_present(&conn).await.unwrap() {
             EnsureOutcome::Generated { plaintext } => plaintext,
             EnsureOutcome::AlreadySet => panic!(),

@@ -21,30 +21,17 @@ use shoebox_client::library_state::{LockAcquireOutcome, LockStatus};
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::similar_names)]
 async fn library_lock_walks_through_all_four_states() {
-    // Skip gate (matches server's proxy_e2e.rs / locks_e2e.rs pattern).
-    let sqld_binary_name =
-        std::env::var("SHOEBOX_SQLD_PATH").unwrap_or_else(|_| "sqld".to_string());
-    if which::which(&sqld_binary_name).is_err() {
-        eprintln!(
-            "skipping library_lock_e2e: sqld not on PATH (set SHOEBOX_SQLD_PATH to override)"
-        );
+    if shoebox_server::skip_unless_sqld!() {
         return;
     }
 
-    // Install rustls provider once per test process.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let server_tmp = TempDir::new().unwrap();
-    let data_dir = server_tmp.path().to_path_buf();
-    let cache_dir = server_tmp.path().join("cache");
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
+    let data_dir = test_db.data_dir.path().to_path_buf();
+    let cache_dir = data_dir.join("cache");
     std::fs::create_dir_all(&cache_dir).unwrap();
-
-    // Bootstrap server-side state.
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&data_dir.join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let db = test_db.db.clone();
     let setup_conn = db.connect().unwrap();
     let shared_secret = match shoebox_server::secret::ensure_present(&setup_conn)
         .await
@@ -65,18 +52,12 @@ async fn library_lock_walks_through_all_four_states() {
     let tls_cfg =
         shoebox_server::mtls::mtls_server_config(&server_cert, &server_keypair, &ca, crl).unwrap();
 
-    // Spawn the sqld subprocess. `start` takes the DATA DIR (it creates
-    // a `sqld/` subdir inside), not a .db path.
-    let embedded_sqld = shoebox_server::sqld_embed::start(data_dir.clone())
-        .await
-        .unwrap();
-
     let state = shoebox_server::http::AppState {
         db: db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
-        sqld_url: embedded_sqld.local_url.clone(),
-        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 
@@ -303,5 +284,5 @@ async fn library_lock_walks_through_all_four_states() {
 
     let _ = shutdown_tx.send(());
     let _ = server.await;
-    embedded_sqld.shutdown().await;
+    test_db.shutdown().await;
 }

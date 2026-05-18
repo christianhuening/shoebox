@@ -71,23 +71,23 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRespon
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::TestDb;
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn health_endpoint_returns_ok_with_schema_version() {
-        let tmp = TempDir::new().unwrap();
-        let db_path = tmp.path().join("catalog.db");
-        let db = Arc::new(Db::open(&db_path).await.unwrap());
-        let ca = Arc::new(crate::ca::Ca::open(tmp.path()).unwrap());
+        let test_db = TestDb::start().await;
+        let ca_dir = TempDir::new().unwrap();
+        let ca = Arc::new(crate::ca::Ca::open(ca_dir.path()).unwrap());
         let state = AppState {
-            db,
+            db: test_db.db.clone(),
             schema_version: shoebox_common::SCHEMA_VERSION,
             ca,
-            sqld_url: "http://127.0.0.1:0".to_string(),
-            sqld_grpc_url: "http://127.0.0.1:0".to_string(),
-            cache_dir: tmp.path().to_path_buf(),
+            sqld_url: test_db.embedded.local_url.clone(),
+            sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
+            cache_dir: ca_dir.path().to_path_buf(),
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
-        assert_eq!(body["schema_version"], 6);
+        assert_eq!(body["schema_version"], shoebox_common::SCHEMA_VERSION);
 
         let _ = tx.send(());
         server.await.unwrap();

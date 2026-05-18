@@ -7,19 +7,18 @@ use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn metrics_endpoint_returns_prometheus_format() {
+    if shoebox_server::skip_unless_sqld!() {
+        return;
+    }
     let temp_dir = TempDir::new().unwrap();
-    let db = Arc::new(
-        shoebox_server::db::Db::open(&temp_dir.path().join("catalog.db"))
-            .await
-            .unwrap(),
-    );
+    let test_db = shoebox_server::test_helpers::TestDb::start().await;
     let ca = Arc::new(shoebox_server::ca::Ca::open(temp_dir.path()).unwrap());
     let state = shoebox_server::http::AppState {
-        db,
+        db: test_db.db.clone(),
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
-        sqld_url: "http://127.0.0.1:0".to_string(),
-        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
+        sqld_url: test_db.embedded.local_url.clone(),
+        sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
         cache_dir: temp_dir.path().to_path_buf(),
     };
 

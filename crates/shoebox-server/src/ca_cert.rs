@@ -25,24 +25,23 @@ async fn handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Db;
-    use std::sync::Arc;
+    use crate::test_helpers::TestDb;
     use tempfile::TempDir;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn ca_cert_returns_pem_body() {
-        let tmp = TempDir::new().unwrap();
-        let db = Arc::new(Db::open(&tmp.path().join("catalog.db")).await.unwrap());
-        let ca = Arc::new(crate::ca::Ca::open(tmp.path()).unwrap());
+        let test_db = TestDb::start().await;
+        let ca_dir = TempDir::new().unwrap();
+        let ca = std::sync::Arc::new(crate::ca::Ca::open(ca_dir.path()).unwrap());
         let state = AppState {
-            db,
+            db: test_db.db.clone(),
             schema_version: shoebox_common::SCHEMA_VERSION,
             ca: ca.clone(),
-            sqld_url: "http://127.0.0.1:0".to_string(),
-            sqld_grpc_url: "http://127.0.0.1:0".to_string(),
-            cache_dir: tmp.path().to_path_buf(),
+            sqld_url: test_db.embedded.local_url.clone(),
+            sqld_grpc_url: test_db.embedded.local_grpc_url.clone(),
+            cache_dir: ca_dir.path().to_path_buf(),
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

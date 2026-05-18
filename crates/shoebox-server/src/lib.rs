@@ -27,6 +27,7 @@ pub mod sqld_embed;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 pub mod thumbnailer;
+pub mod upgrade;
 pub mod thumbs_http;
 pub mod tls_server;
 pub mod whoami;

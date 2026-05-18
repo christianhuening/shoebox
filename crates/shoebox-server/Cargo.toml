@@ -64,13 +64,14 @@ reqwest = { workspace = true }
 # dev-dependencies so the `test_helpers` module can use `tempfile` when
 # downstream crates compile this crate's tests with `features = ["test-helpers"]`.
 tempfile = { version = "3", optional = true }
+which = { version = "6", optional = true }
 
 [features]
 default = []
 # Re-export integration-test helpers (`shoebox_server::test_helpers::TestDb`).
 # Enabled by `shoebox-client`'s dev-dependencies so the client's integration
 # tests can spawn a sqld-backed Db with one call.
-test-helpers = ["dep:tempfile"]
+test-helpers = ["dep:tempfile", "dep:which"]
 
 [dev-dependencies]
 reqwest = { workspace = true }

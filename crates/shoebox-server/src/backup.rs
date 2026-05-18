@@ -102,16 +102,16 @@ fn unix_seconds_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::TestDb;
     use tempfile::TempDir;
 
     #[tokio::test]
     async fn run_one_creates_a_backup_file() {
-        let tmp = TempDir::new().unwrap();
-        let db_path = tmp.path().join("catalog.db");
-        let db = Db::open(&db_path).await.unwrap();
-        let backup_dir = tmp.path().join("backups");
+        let test_db = TestDb::start().await;
+        let backup_dir_tmp = TempDir::new().unwrap();
+        let backup_dir = backup_dir_tmp.path().join("backups");
         std::fs::create_dir_all(&backup_dir).unwrap();
-        run_one(&db, &backup_dir).await.unwrap();
+        run_one(&test_db.db, &backup_dir).await.unwrap();
         let entries: Vec<_> = std::fs::read_dir(&backup_dir).unwrap().collect();
         assert_eq!(
             entries.len(),
