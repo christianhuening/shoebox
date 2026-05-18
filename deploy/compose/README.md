@@ -3,19 +3,23 @@
 Single-box deployment of `shoebox-server` via Docker Compose. Suitable for
 NASes with a Docker runtime, home servers, and dedicated boxes.
 
-## Setup (4 steps)
+## Setup (5 steps)
 
 ```bash
-# 1. Copy the env template
+# 1. Replace CHANGE-ME-OWNER with the actual GitHub org that hosts the
+#    shoebox image (e.g. `acme-corp`). Skip if you've already forked.
+sed -i 's|ghcr.io/CHANGE-ME-OWNER|ghcr.io/<owner>|' docker-compose.yml
+
+# 2. Copy the env template
 cp .env.example .env
 
-# 2. Generate a bootstrap secret and paste it into .env
+# 3. Generate a bootstrap secret and paste it into .env
 echo "SHOEBOX_SECRET=$(openssl rand -base64 24)" >> .env
 
-# 3. Edit .env: set SHOEBOX_PHOTOS_DIR to the host path of your library
+# 4. Edit .env: set SHOEBOX_PHOTOS_DIR to the host path of your library
 ${EDITOR:-nano} .env
 
-# 4. Start the server
+# 5. Start the server
 docker compose up -d
 ```
 
