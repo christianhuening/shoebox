@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Plans 1.1–1.5 implemented. Sub-project complete. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plans 1.1–1.5 + 1.3.5 (replica gRPC + single source of truth) implemented. Sub-project complete. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) · [1.3.5 spec](docs/superpowers/specs/2026-05-18-sub-1-3-5-replica-grpc-and-single-source-of-truth-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -90,7 +90,15 @@ Operator-facing docs live in `docs/deployment/`.
 ## Implementation status
 
 - `crates/shoebox-server` — full data plane:
-  - libSQL embedded `sqld` subprocess + mTLS-protected wire proxy on `/v1/*` and `/v2/*`
+  - libSQL embedded `sqld` subprocess (both `--http-listen-addr` for Hrana
+    and `--grpc-listen-addr` for replication, against one `--db-path`).
+    `shoebox-server`'s own `Db` opens a libsql remote client to sqld's HTTP
+    port — all server-side writes flow through the same SQLite that backs
+    client replicas, no separate `catalog.db`.
+  - mTLS proxy on `:9000` that branches by `Content-Type`: gRPC traffic
+    (HTTP/2) forwards to sqld's grpc port with the `/v1`/`/v2` path prefix
+    stripped; Hrana traffic (HTTP/1.1) forwards to sqld's http port. ALPN
+    advertises `h2 + http/1.1`.
   - Filesystem indexer (BLAKE3 hashing, folder mirroring) with `notify`-based live watcher
   - Thumbnailer (256 px + 2 k JPEGs to shared cache, content-addressed by hash)
   - HTTP endpoints: `/enroll`, `/renew`, `/whoami`, `/thumbs/<hash>`, `/previews/<hash>`, `/locks/:variant_id` (acquire/heartbeat/release/takeover)
@@ -129,9 +137,9 @@ Operator-facing docs live in `docs/deployment/`.
 Surfaced during Plan 1.3/1.4/1.4b implementation; tracked as memory notes for future attention:
 
 - **rawler forces JPEG decode + re-encode.** No public access to raw embedded JPEG bytes; we decode via rawler and re-encode at quality 90. Net cost: one extra JPEG round-trip per indexed RAW. See memory: `project_rawler_api_constraints.md`.
-- **Two writers to `catalog.db`.** The migration runner (`Db`) and the spawned `sqld` subprocess both hold the same SQLite file. SQLite WAL handles this badly across processes; the v1 risk is accepted. Resolution: route all server-side writes through the loopback sqld connection. See memory: `project_libsql_server_unpublished.md`.
 - **No grid virtualization.** Folders with thousands of photos will render slowly. Plan 1.4b grids ~30-photo test sets cleanly; full virtualization is sub-project #3.
 - **Lock UI surfaces 4 states, no auto-release on app exit.** Releasing a lock requires the user clicking Release; if the app dies, the lock expires via the server janitor's 30 min TTL instead.
+- **Client-side writes via the embedded replica are broken** (libsql 0.9.30 ↔ sqld 0.24.32 protocol mismatch). The libsql client sends `x-authorization` on WriteProxy gRPC calls but sqld 0.24.32 (latest released) expects `x-proxy-authorization` and rejects with `InvalidArgument`. Reads via the replica work fine, and server-side writes (via libsql Remote/Hrana, which bypasses WriteProxy) work fine — but `conn.execute()` from the client's `Replica` will fail. Resolution path: replace the client's replica-write code paths with custom HTTP endpoints handled server-side, or wait for an upstream sqld release that accepts `x-authorization` (or a libsql release that sends `x-proxy-authorization`). Tracked in sub-1-3-5 spec follow-ups.
 
 ## Memory pointers
 
