@@ -15,7 +15,7 @@ own spec → plan → implementation cycle. Sub-project status:
 
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
-| 1 | **Catalog, sync & stack** | Plans 1.1–1.4b implemented. Plan 1.5 (deployment) pending. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
+| 1 | **Catalog, sync & stack** | Plans 1.1–1.5 implemented. Sub-project complete. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) |
 | 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
@@ -71,7 +71,11 @@ shoebox/
         └── plans/                           ← per-sub-project implementation plans
 ```
 
-Deployment directories (`deploy/`, etc.) will be added as Plan 1.5 begins.
+Deployment directories (`deploy/compose/`, `deploy/helm/shoebox/`,
+`deploy/systemd/`, `deploy/openrc/`) and release tooling
+(`.github/release/`, `.github/workflows/release.yml`,
+`.github/workflows/helm-lint.yml`) shipped with Plan 1.5.
+Operator-facing docs live in `docs/deployment/`.
 
 ## Working on this project
 
@@ -105,12 +109,19 @@ Deployment directories (`deploy/`, etc.) will be added as Plan 1.5 begins.
   - Editing actions through local replica: rate (per-user UPSERT), keyword add/remove (race-resolved), virtual copy
   - Develop-lock UI: 5 s status poll from local replica; acquire/release/takeover via `/locks/:id`; 5 min heartbeat
   - Keyboard: arrows navigate grid; 0-5 set rating on selected variant
+- `deploy/` + `.github/release/` + `.github/workflows/{release,helm-lint}.yml` — full deployment plane (Plan 1.5):
+  - Multi-arch Docker image (`linux/amd64` + `linux/arm64`) published to `ghcr.io/<owner>/shoebox-server` on every `v*` tag and on `main`. Arm64 sqld pinned to `37f9eee4...`, amd64 to `71720fc8...`. `release.yml` does a QEMU `sqld --help` smoke after push to catch arm64 layer regressions.
+  - GitHub Releases standalone tarballs: `linux-amd64`, `linux-arm64` (via `cross 0.2.5`), `macos-arm64` (`macos-14` runner). Each bundles `shoebox-server` + matching pinned `sqld` + Linux: systemd + OpenRC units, macOS: launchd plist + `config.example.toml` + README, with sha256 sidecar.
+  - Helm chart (`deploy/helm/shoebox/`): single-replica, two PVCs (data unconditional + optional cache), photos via existingClaim or hostPath. Auto-generated bootstrap Secret with `helm.sh/resource-policy: keep` AND a `lookup` guard so `helm upgrade` reuses the in-cluster value (avoids rotating clients' cert-signing CA). `_helpers.tpl` validators (`shoebox.validateSecret`, `shoebox.validatePhotos`) `fail` fast on misconfig. `helm-lint.yml` enforces `helm lint` + `helm template` golden-file diff (SHOEBOX_SECRET redacted) on PRs touching `deploy/helm/**`.
+  - Compose example (`deploy/compose/`): single-service `docker-compose.yml` (with `SHOEBOX_HEALTH_BIND_ADDR=0.0.0.0:9001` baked in so host port-mapping reaches health) + `.env.example` + README. CI smoke-tests it (`compose-smoke` job in `ci.yml`, 60 s ceiling).
+  - Binary smoke (`binary-smoke` job in `ci.yml`): builds the linux-amd64 tarball, verifies the tar listing contains all expected files (bin/, share/systemd/, share/openrc/, etc.), extracts, runs the server against synthetic env, hits `/health`, kills cleanly. arm64 + macos targets get build-only validation; runtime smoke for those requires hardware (backlog).
+  - Three deployment quickstarts under `docs/deployment/{quickstart-docker,quickstart-binary,quickstart-kubernetes}.md`.
 - `crates/shoebox-common` — shared `Error`/`Result`, `UserId`/`MachineId`, `SCHEMA_VERSION`.
 - Run locally:
   - Server: `cargo run -p shoebox-server` (mTLS on `0.0.0.0:9000`, health+metrics on `127.0.0.1:9001`).
   - Client: `cargo run -p shoebox-client` (against a running `shoebox-server`).
-- Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev`. The image bundles `sqld`.
-- CI: fmt + clippy + tests + docker build on push and PR.
+- Run in Docker: `docker build -t shoebox-server:dev . && docker run --rm -p 9000:9000 -v shoebox-data:/var/lib/shoebox shoebox-server:dev`. The image bundles `sqld`. (For end-user deployment, see `docs/deployment/quickstart-docker.md`.)
+- CI: fmt + clippy + tests + docker build + compose-smoke + binary-smoke on push and PR (`ci.yml`); helm-lint on PRs touching `deploy/helm/**` (`helm-lint.yml`); multi-arch image push + tarball release + chart package on `v*` tag (`release.yml`).
 - **Toolchain:** `rust-toolchain.toml` pins `stable`. MSRV in workspace `Cargo.toml` is 1.85 (libsql 0.6 transitive deps require edition2024).
 
 ## Known limitations (Plan 1.3+1.4+1.4b v1)
