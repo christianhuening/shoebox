@@ -125,6 +125,7 @@ async fn serve_main(cfg: config::Config) -> anyhow::Result<()> {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cfg.cache_dir.clone(),
     };
 

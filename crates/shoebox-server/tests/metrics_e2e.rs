@@ -19,6 +19,7 @@ async fn metrics_endpoint_returns_prometheus_format() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca,
         sqld_url: "http://127.0.0.1:0".to_string(),
+        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
         cache_dir: temp_dir.path().to_path_buf(),
     };
 

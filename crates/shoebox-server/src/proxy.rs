@@ -31,14 +31,38 @@ use hyper_util::rt::TokioExecutor;
 use crate::http::AppState;
 use crate::identity::ClientIdentity;
 
-/// Process-wide hyper client for forwarding HTTP requests to the loopback
-/// `sqld` subprocess. Built once on first use so that the legacy hyper client's
-/// connection pool actually does its job — rebuilding per request would force a
-/// fresh TCP handshake on every `/v2/pipeline` POST and defeat keep-alive.
+/// Process-wide hyper clients for forwarding requests to the loopback `sqld`
+/// subprocess. One client for HTTP/1.1 Hrana traffic, one for HTTP/2 gRPC
+/// replication traffic. Built once on first use so that the legacy hyper
+/// client's connection pool actually does its job — rebuilding per request
+/// would force a fresh TCP handshake on every `/v2/pipeline` POST or gRPC
+/// `LogEntries` call and defeat keep-alive.
 static UPSTREAM_HTTP_CLIENT: OnceLock<HyperClient<HttpConnector, Body>> = OnceLock::new();
+static UPSTREAM_GRPC_CLIENT: OnceLock<HyperClient<HttpConnector, Body>> = OnceLock::new();
 
 fn upstream_http_client() -> &'static HyperClient<HttpConnector, Body> {
     UPSTREAM_HTTP_CLIENT.get_or_init(|| HyperClient::builder(TokioExecutor::new()).build_http())
+}
+
+/// HTTP/2-only client for forwarding gRPC traffic to sqld's `--grpc-listen-addr`
+/// loopback port. `http2_only(true)` enables h2-prior-knowledge mode — the
+/// connection sends the HTTP/2 preface immediately without HTTP/1.1 upgrade,
+/// which is what sqld's gRPC listener expects on a plaintext port.
+fn upstream_grpc_client() -> &'static HyperClient<HttpConnector, Body> {
+    UPSTREAM_GRPC_CLIENT.get_or_init(|| {
+        HyperClient::builder(TokioExecutor::new())
+            .http2_only(true)
+            .build_http()
+    })
+}
+
+/// Returns true if the request is gRPC, i.e. has `Content-Type: application/grpc`
+/// (RFC 9113-ish; gRPC over HTTP/2). Hrana queries carry `application/json`.
+fn is_grpc_request(req: &Request) -> bool {
+    req.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|content_type| content_type.starts_with("application/grpc"))
 }
 
 /// Build the `/v1/*` + `/v2/*` catch-all routes that forward to `sqld`.
@@ -60,7 +84,7 @@ async fn forward_http(
     mut req: Request,
 ) -> Response {
     if let Some(websocket_upgrade) = websocket_upgrade {
-        let upstream_url = build_upstream_url(&state.sqld_url, req.uri(), true);
+        let upstream_url = build_upstream_url(&state.sqld_url, req.uri(), true, false);
         return websocket_upgrade.on_upgrade(move |client_socket| async move {
             if let Err(forward_error) = forward_ws(client_socket, upstream_url).await {
                 tracing::warn!(event = "proxy.ws.error", error = %forward_error);
@@ -68,7 +92,32 @@ async fn forward_http(
         });
     }
 
-    let upstream_uri: Uri = match build_upstream_url(&state.sqld_url, req.uri(), false).parse() {
+    // Branch by Content-Type. gRPC requests get forwarded over HTTP/2 to
+    // sqld's --grpc-listen-addr port with the /v1 or /v2 path prefix
+    // stripped (tonic preserves the path of the sync URL the client gave,
+    // so requests land as `/v1/wal_log.ReplicationLog/Hello` here — sqld's
+    // gRPC server expects `/wal_log.ReplicationLog/Hello`). Non-gRPC
+    // requests continue down the existing HTTP/1.1 path to sqld's
+    // --http-listen-addr port, unchanged.
+    let is_grpc = is_grpc_request(&req);
+    let (upstream_base, client, strip_proxy_prefix) = if is_grpc {
+        (
+            state.sqld_grpc_url.as_str(),
+            upstream_grpc_client(),
+            true,
+        )
+    } else {
+        (state.sqld_url.as_str(), upstream_http_client(), false)
+    };
+
+    let upstream_uri: Uri = match build_upstream_url(
+        upstream_base,
+        req.uri(),
+        false,
+        strip_proxy_prefix,
+    )
+    .parse()
+    {
         Ok(parsed_uri) => parsed_uri,
         Err(parse_error) => {
             return (
@@ -83,18 +132,28 @@ async fn forward_http(
     let request_headers = req.headers_mut();
     // Strip hop-by-hop headers (RFC 7230 §6.1). The upstream connection
     // is a fresh hyper connection; reusing these from the client request
-    // would corrupt the proxied exchange.
+    // would corrupt the proxied exchange. **Crucially**, `TE: trailers`
+    // is hop-by-hop on HTTP/1 but is the contract that tells the upstream
+    // gRPC server it may emit trailers. Preserve it for gRPC requests so
+    // sqld actually sends `grpc-status` back as a trailer.
     request_headers.remove(header::HOST);
     request_headers.remove(header::CONNECTION);
     request_headers.remove("keep-alive");
     request_headers.remove("proxy-connection");
     request_headers.remove(header::TRANSFER_ENCODING);
     request_headers.remove(header::UPGRADE);
+    if !is_grpc {
+        request_headers.remove("te");
+    }
 
-    match upstream_http_client().request(req).await {
+    match client.request(req).await {
         Ok(upstream_response) => upstream_response.into_response(),
         Err(forward_error) => {
-            tracing::warn!(event = "proxy.http.error", error = %forward_error);
+            tracing::warn!(
+                event = "proxy.http.error",
+                grpc = is_grpc,
+                error = %forward_error
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 format!("upstream sqld unreachable: {forward_error}"),
@@ -172,8 +231,17 @@ async fn forward_ws(
 }
 
 /// Build an upstream URL for `sqld`, swapping the scheme to `ws[s]://` for
-/// WebSocket upgrades and preserving the original path + query.
-fn build_upstream_url(sqld_base: &str, req_uri: &Uri, ws: bool) -> String {
+/// WebSocket upgrades and preserving the original path + query. When
+/// `strip_proxy_prefix` is true (gRPC forwarding), the leading `/v1` or
+/// `/v2` prefix is stripped from the path so that gRPC method paths
+/// reach sqld in the form sqld registers them — `/wal_log.ReplicationLog/Hello`
+/// rather than `/v1/wal_log.ReplicationLog/Hello`.
+fn build_upstream_url(
+    sqld_base: &str,
+    req_uri: &Uri,
+    ws: bool,
+    strip_proxy_prefix: bool,
+) -> String {
     let base = if ws {
         sqld_base
             .replacen("http://", "ws://", 1)
@@ -181,10 +249,32 @@ fn build_upstream_url(sqld_base: &str, req_uri: &Uri, ws: bool) -> String {
     } else {
         sqld_base.to_string()
     };
-    let path_and_query = req_uri
+    let raw_path_and_query = req_uri
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
+    let path_and_query = if strip_proxy_prefix {
+        strip_v1_or_v2_prefix(raw_path_and_query)
+    } else {
+        raw_path_and_query.to_string()
+    };
     format!("{base}{path_and_query}")
+}
+
+/// Strip a leading `/v1` or `/v2` segment from a path+query string.
+/// `/v1/wal_log.ReplicationLog/Hello?baton=x` → `/wal_log.ReplicationLog/Hello?baton=x`.
+/// A bare `/v1` or `/v1/` becomes `/`.
+fn strip_v1_or_v2_prefix(path_and_query: &str) -> String {
+    for prefix in ["/v1/", "/v2/"] {
+        if let Some(rest) = path_and_query.strip_prefix(prefix) {
+            return format!("/{rest}");
+        }
+    }
+    for bare in ["/v1", "/v2"] {
+        if path_and_query == bare {
+            return "/".to_string();
+        }
+    }
+    path_and_query.to_string()
 }
 
 #[cfg(test)]
@@ -195,7 +285,7 @@ mod tests {
     fn build_upstream_url_preserves_path_and_query() {
         let base = "http://127.0.0.1:53421";
         let request_uri: Uri = "/v2/pipeline?baton=abc".parse().unwrap();
-        let upstream = build_upstream_url(base, &request_uri, false);
+        let upstream = build_upstream_url(base, &request_uri, false, false);
         assert_eq!(upstream, "http://127.0.0.1:53421/v2/pipeline?baton=abc");
     }
 
@@ -203,7 +293,7 @@ mod tests {
     fn build_upstream_url_swaps_http_to_ws_when_upgrading() {
         let base = "http://127.0.0.1:53421";
         let request_uri: Uri = "/v2/streams".parse().unwrap();
-        let upstream = build_upstream_url(base, &request_uri, true);
+        let upstream = build_upstream_url(base, &request_uri, true, false);
         assert_eq!(upstream, "ws://127.0.0.1:53421/v2/streams");
     }
 
@@ -211,7 +301,7 @@ mod tests {
     fn build_upstream_url_swaps_https_to_wss_when_upgrading() {
         let base = "https://127.0.0.1:53421";
         let request_uri: Uri = "/v2/streams".parse().unwrap();
-        let upstream = build_upstream_url(base, &request_uri, true);
+        let upstream = build_upstream_url(base, &request_uri, true, false);
         assert_eq!(upstream, "wss://127.0.0.1:53421/v2/streams");
     }
 
@@ -220,7 +310,50 @@ mod tests {
         let base = "http://127.0.0.1:53421";
         // A bare authority URI has no path-and-query.
         let request_uri: Uri = Uri::default();
-        let upstream = build_upstream_url(base, &request_uri, false);
+        let upstream = build_upstream_url(base, &request_uri, false, false);
         assert_eq!(upstream, "http://127.0.0.1:53421/");
+    }
+
+    #[test]
+    fn build_upstream_url_strips_v1_prefix_for_grpc() {
+        let base = "http://127.0.0.1:53422";
+        let request_uri: Uri = "/v1/wal_log.ReplicationLog/Hello".parse().unwrap();
+        let upstream = build_upstream_url(base, &request_uri, false, true);
+        assert_eq!(
+            upstream,
+            "http://127.0.0.1:53422/wal_log.ReplicationLog/Hello"
+        );
+    }
+
+    #[test]
+    fn build_upstream_url_strips_v2_prefix_for_grpc() {
+        let base = "http://127.0.0.1:53422";
+        let request_uri: Uri = "/v2/wal_log.ReplicationLog/LogEntries?token=x"
+            .parse()
+            .unwrap();
+        let upstream = build_upstream_url(base, &request_uri, false, true);
+        assert_eq!(
+            upstream,
+            "http://127.0.0.1:53422/wal_log.ReplicationLog/LogEntries?token=x"
+        );
+    }
+
+    #[test]
+    fn build_upstream_url_passes_through_when_no_prefix_to_strip() {
+        let base = "http://127.0.0.1:53422";
+        let request_uri: Uri = "/wal_log.ReplicationLog/Hello".parse().unwrap();
+        let upstream = build_upstream_url(base, &request_uri, false, true);
+        assert_eq!(
+            upstream,
+            "http://127.0.0.1:53422/wal_log.ReplicationLog/Hello"
+        );
+    }
+
+    #[test]
+    fn strip_prefix_handles_bare_v1() {
+        assert_eq!(strip_v1_or_v2_prefix("/v1"), "/");
+        assert_eq!(strip_v1_or_v2_prefix("/v2"), "/");
+        assert_eq!(strip_v1_or_v2_prefix("/v1/"), "/");
+        assert_eq!(strip_v1_or_v2_prefix("/other/path"), "/other/path");
     }
 }

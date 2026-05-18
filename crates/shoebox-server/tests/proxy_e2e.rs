@@ -68,6 +68,7 @@ async fn libsql_http_request_reaches_embedded_sqld_through_proxy() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

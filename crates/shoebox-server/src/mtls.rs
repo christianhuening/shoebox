@@ -145,10 +145,15 @@ pub fn mtls_server_config(
         crl,
     });
 
-    let config = ServerConfig::builder()
+    let mut config = ServerConfig::builder()
         .with_client_cert_verifier(verifier)
         .with_single_cert(vec![cert_der], key_der)
         .map_err(|e| anyhow!("building rustls ServerConfig: {e}"))?;
+    // ALPN advertises h2 (gRPC replication) ahead of http/1.1 (Hrana,
+    // /enroll, /thumbs, /locks). Clients negotiate whichever they need;
+    // the proxy further branches on Content-Type to route gRPC traffic
+    // to sqld's grpc port and Hrana traffic to sqld's http port.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 

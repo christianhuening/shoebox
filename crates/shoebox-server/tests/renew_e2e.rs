@@ -50,6 +50,7 @@ async fn renewed_cert_can_call_whoami_with_same_user_id() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: "http://127.0.0.1:0".to_string(),
+        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
         cache_dir: tmp.path().to_path_buf(),
     };
 

@@ -13,9 +13,15 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub schema_version: i64,
     pub ca: Arc<crate::ca::Ca>,
-    /// Loopback URL of the embedded `sqld` subprocess, e.g. `http://127.0.0.1:53421`.
-    /// The libSQL wire proxy forwards `/v1/*` and `/v2/*` to this base.
+    /// Loopback URL of the embedded `sqld` subprocess (Hrana HTTP),
+    /// e.g. `http://127.0.0.1:53421`. The proxy forwards non-gRPC
+    /// `/v1/*` and `/v2/*` requests here.
     pub sqld_url: String,
+    /// Loopback URL of the embedded `sqld` subprocess (replication gRPC),
+    /// e.g. `http://127.0.0.1:53422`. The proxy forwards requests with
+    /// `Content-Type: application/grpc*` here. Same backing db as
+    /// `sqld_url`.
+    pub sqld_grpc_url: String,
     /// Directory holding generated thumbnails. Populated for forward
     /// compatibility with the thumbnail HTTP endpoints (Plan 1.3 Task 13).
     pub cache_dir: std::path::PathBuf,
@@ -80,6 +86,7 @@ mod tests {
             schema_version: shoebox_common::SCHEMA_VERSION,
             ca,
             sqld_url: "http://127.0.0.1:0".to_string(),
+            sqld_grpc_url: "http://127.0.0.1:0".to_string(),
             cache_dir: tmp.path().to_path_buf(),
         };
 

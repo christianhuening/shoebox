@@ -67,6 +67,7 @@ async fn renewal_fires_when_under_30_days_remaining() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

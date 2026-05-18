@@ -67,6 +67,7 @@ async fn first_run_round_trips_to_library_state() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

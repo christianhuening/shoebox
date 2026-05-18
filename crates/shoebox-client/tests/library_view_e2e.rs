@@ -70,6 +70,7 @@ async fn library_view_round_trips_folder_grid_detail_and_edits() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

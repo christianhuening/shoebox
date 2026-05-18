@@ -76,6 +76,7 @@ async fn library_lock_walks_through_all_four_states() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: embedded_sqld.local_url.clone(),
+        sqld_grpc_url: embedded_sqld.local_grpc_url.clone(),
         cache_dir: cache_dir.clone(),
     };
 

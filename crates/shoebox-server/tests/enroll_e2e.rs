@@ -53,6 +53,7 @@ async fn enroll_then_use_cert_to_call_whoami() {
         schema_version: shoebox_common::SCHEMA_VERSION,
         ca: ca.clone(),
         sqld_url: "http://127.0.0.1:0".to_string(),
+        sqld_grpc_url: "http://127.0.0.1:0".to_string(),
         cache_dir: tmp.path().to_path_buf(),
     };
 

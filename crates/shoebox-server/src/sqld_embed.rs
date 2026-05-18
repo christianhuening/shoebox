@@ -34,10 +34,16 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::{Child, Command};
 
-/// A running `sqld` child process bound to an ephemeral loopback port.
+/// A running `sqld` child process bound to two ephemeral loopback ports —
+/// one for Hrana HTTP, one for the libSQL replication gRPC protocol.
 pub struct EmbeddedSqld {
-    /// Loopback URL the proxy targets, e.g. `http://127.0.0.1:53421`.
+    /// HTTP/Hrana loopback URL the proxy targets for `/v1/*` non-gRPC
+    /// requests, e.g. `http://127.0.0.1:53421`.
     pub local_url: String,
+    /// gRPC/replication loopback URL the proxy targets for `application/grpc`
+    /// requests, e.g. `http://127.0.0.1:53422`. Same underlying db as
+    /// `local_url` — sqld serves both ports against `--db-path`.
+    pub local_grpc_url: String,
     /// Child process handle. Drop will SIGKILL.
     pub child: Child,
 }
@@ -117,18 +123,23 @@ async fn wait_until_ready(local_url: &str) -> Result<()> {
 pub async fn start(data_dir: PathBuf) -> Result<EmbeddedSqld> {
     let ephemeral_port = pick_loopback_port()?;
     let local_url = format!("http://127.0.0.1:{ephemeral_port}");
+    let grpc_port = pick_loopback_port()?;
+    let local_grpc_url = format!("http://127.0.0.1:{grpc_port}");
     let binary_path = sqld_binary();
 
     let sqld_data_subdir = data_dir.join("sqld");
     std::fs::create_dir_all(&sqld_data_subdir).context("creating sqld subdir")?;
 
     // sqld arg conventions vary across versions; the common ones (v0.24-era):
-    //   --http-listen-addr 127.0.0.1:PORT
-    //   --db-path <dir-or-file>
+    //   --http-listen-addr 127.0.0.1:PORT  — Hrana HTTP API
+    //   --grpc-listen-addr 127.0.0.1:PORT  — libSQL replication gRPC API
+    //   --db-path <dir>                    — single backing db for both
     let mut spawn_cmd = Command::new(&binary_path);
     spawn_cmd
         .arg("--http-listen-addr")
         .arg(format!("127.0.0.1:{ephemeral_port}"))
+        .arg("--grpc-listen-addr")
+        .arg(format!("127.0.0.1:{grpc_port}"))
         .arg("--db-path")
         .arg(&sqld_data_subdir)
         .stdout(Stdio::null())
@@ -139,6 +150,7 @@ pub async fn start(data_dir: PathBuf) -> Result<EmbeddedSqld> {
         event = "sqld.spawn",
         bin = %binary_path,
         local_url = %local_url,
+        local_grpc_url = %local_grpc_url,
         db_path = ?sqld_data_subdir,
         "spawning sqld subprocess"
     );
@@ -165,6 +177,7 @@ pub async fn start(data_dir: PathBuf) -> Result<EmbeddedSqld> {
 
     Ok(EmbeddedSqld {
         local_url,
+        local_grpc_url,
         child: child_process,
     })
 }
