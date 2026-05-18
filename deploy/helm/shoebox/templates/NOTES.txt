@@ -1,0 +1,27 @@
+shoebox-server v{{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+In-cluster URL (mTLS):
+    {{ include "shoebox.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.ports.mtls }}
+
+Health + Prometheus metrics (in-cluster):
+    {{ include "shoebox.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.ports.health }}/{health,metrics}
+
+Bootstrap secret (share with each desktop client at enrollment):
+    kubectl -n {{ .Release.Namespace }} get secret {{ include "shoebox.secretName" . }} \
+        -o jsonpath='{.data.{{ .Values.secret.key }}}' | base64 -d ; echo
+
+{{ if .Values.secret.create }}
+NOTE: The bootstrap Secret is annotated helm.sh/resource-policy: keep,
+so `helm uninstall {{ .Release.Name }}` will NOT delete it. Existing
+client certificates depend on the CA derived from this secret. Drop it
+manually with `kubectl delete secret {{ include "shoebox.secretName" . }}`
+only if you intend to invalidate every enrolled client.
+{{ end }}
+
+Exposing the service:
+    mTLS terminates at the server. Expose via a LoadBalancer Service,
+    a NodePort, or a sidecar (Tailscale/Wireguard/etc.). Do NOT put a
+    Layer-7 proxy in front — it cannot terminate mTLS for shoebox
+    clients.
+
+High availability is NOT supported in v0.x (single replica only).
