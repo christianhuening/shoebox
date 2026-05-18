@@ -56,7 +56,7 @@
       "type": "object",
       "required": ["type", "ports"],
       "properties": {
-        "type": { "type": "string" },
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"] },
         "ports": {
           "type": "object",
           "required": ["mtls", "health"],

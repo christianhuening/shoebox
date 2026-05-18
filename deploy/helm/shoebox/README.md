@@ -11,10 +11,11 @@ helm install shoebox ./shoebox \
 ```
 
 The chart auto-generates `SHOEBOX_SECRET` on first install. Retrieve it
-afterwards:
+afterwards (replace `<release>` with your Helm release name; using the
+quick-install command above it's `shoebox`):
 
 ```bash
-kubectl get secret shoebox-bootstrap \
+kubectl get secret <release>-shoebox-bootstrap \
   -o jsonpath='{.data.SHOEBOX_SECRET}' | base64 -d
 ```
 
@@ -36,8 +37,8 @@ violated.
 helm uninstall shoebox
 # The bootstrap Secret is kept (resource-policy: keep) so existing
 # client certs continue to authenticate after reinstall.
-# Drop it manually if you really want a fresh start:
-kubectl delete secret shoebox-bootstrap
+# Drop it manually if you really want a fresh start (replace <release>):
+kubectl delete secret <release>-shoebox-bootstrap
 ```
 
 ## What's NOT in the chart
