@@ -16,7 +16,7 @@ own spec → plan → implementation cycle. Sub-project status:
 | # | Sub-project | Status | Spec |
 |---|---|---|---|
 | 1 | **Catalog, sync & stack** | Plans 1.1–1.5 + 1.3.5 (replica gRPC + single source of truth) implemented. Sub-project complete. | [spec](docs/superpowers/specs/2026-05-17-catalog-sync-and-stack-design.md) · [1.3.5 spec](docs/superpowers/specs/2026-05-18-sub-1-3-5-replica-grpc-and-single-source-of-truth-design.md) |
-| 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Not started | — |
+| 2 | RAW pipeline (PEF/RAF/DNG decode, demosaic, color mgmt) | Spec drafted (2026-05-19) | [spec](docs/superpowers/specs/2026-05-19-raw-pipeline-design.md) |
 | 3 | Library / browser UI (grid, filmstrip, search, filter) | Not started | — |
 | 4 | Develop module (sliders, curves, masks, real-time preview) | Not started | — |
 | 5 | Export pipeline (render → JPEG/TIFF/HEIC, presets) | Not started | — |
