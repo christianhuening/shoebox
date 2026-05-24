@@ -121,32 +121,22 @@ async fn forward_http(
     // --http-listen-addr port, unchanged.
     let is_grpc = is_grpc_request(&req);
     let (upstream_base, client, strip_proxy_prefix) = if is_grpc {
-        (
-            state.sqld_grpc_url.as_str(),
-            upstream_grpc_client(),
-            true,
-        )
+        (state.sqld_grpc_url.as_str(), upstream_grpc_client(), true)
     } else {
         (state.sqld_url.as_str(), upstream_http_client(), false)
     };
 
-    let upstream_uri: Uri = match build_upstream_url(
-        upstream_base,
-        req.uri(),
-        false,
-        strip_proxy_prefix,
-    )
-    .parse()
-    {
-        Ok(parsed_uri) => parsed_uri,
-        Err(parse_error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("bad upstream URI: {parse_error}"),
-            )
-                .into_response();
-        }
-    };
+    let upstream_uri: Uri =
+        match build_upstream_url(upstream_base, req.uri(), false, strip_proxy_prefix).parse() {
+            Ok(parsed_uri) => parsed_uri,
+            Err(parse_error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("bad upstream URI: {parse_error}"),
+                )
+                    .into_response();
+            }
+        };
 
     *req.uri_mut() = upstream_uri;
     let request_headers = req.headers_mut();

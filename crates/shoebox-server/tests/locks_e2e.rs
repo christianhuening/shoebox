@@ -2,7 +2,7 @@
 //! REST flow between them — acquire, conflict, takeover, release, re-acquire.
 //!
 //! Sub-1-3-5 routed Db through sqld, so this test now depends on sqld too
-//! (TestDb spawns one). Skipped when sqld is not on PATH.
+//! (`TestDb` spawns one). Skipped when sqld is not on PATH.
 
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use reqwest::Client;

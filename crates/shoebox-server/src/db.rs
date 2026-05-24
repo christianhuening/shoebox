@@ -2,7 +2,7 @@
 //!
 //! As of sub-1-3-5, `Db::open` connects to the embedded `sqld` subprocess
 //! via libsql's remote backend (Hrana HTTP over loopback) rather than
-//! opening a local SQLite file directly. `sqld` is the single backing
+//! opening a local `SQLite` file directly. `sqld` is the single backing
 //! store for both server-side writes (this Db) and client-side replicas
 //! (which sync from sqld's gRPC port through the mTLS proxy).
 
